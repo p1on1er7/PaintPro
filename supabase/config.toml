@@ -1,0 +1,7 @@
+project_id = "qnzznwhogreduxpczqiu"
+
+[functions.chat-decoratore]
+verify_jwt = false
+
+[functions.genera-immagine]
+verify_jwt = false

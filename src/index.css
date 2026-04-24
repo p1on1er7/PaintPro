@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* PaintPro — Cantiere Moderno design system. HSL only. */
+
+@layer base {
+  :root {
+    --background: 220 20% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Brand: navy primary, orange accent, blue secondary */
+    --primary: 222 47% 11%;
+    --primary-foreground: 220 20% 98%;
+
+    --secondary: 217 91% 60%;
+    --secondary-foreground: 0 0% 100%;
+
+    --accent: 24 95% 53%;
+    --accent-foreground: 0 0% 100%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 222 12% 42%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 71% 38%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 24 95% 53%;
+
+    --radius: 0.875rem;
+
+    /* Gradients */
+    --gradient-brand: linear-gradient(135deg, hsl(222 47% 11%), hsl(217 91% 25%));
+    --gradient-accent: linear-gradient(135deg, hsl(24 95% 53%), hsl(15 90% 50%));
+    --gradient-soft: linear-gradient(180deg, hsl(220 20% 99%), hsl(220 14% 96%));
+
+    /* Shadows */
+    --shadow-card: 0 1px 3px 0 hsl(222 47% 11% / 0.04), 0 1px 2px -1px hsl(222 47% 11% / 0.04);
+    --shadow-elevated: 0 10px 30px -10px hsl(222 47% 11% / 0.15);
+    --shadow-accent: 0 8px 24px -8px hsl(24 95% 53% / 0.4);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 220 20% 98%;
+
+    --card: 222 47% 9%;
+    --card-foreground: 220 20% 98%;
+
+    --popover: 222 47% 9%;
+    --popover-foreground: 220 20% 98%;
+
+    --primary: 220 20% 98%;
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 217 91% 60%;
+    --secondary-foreground: 0 0% 100%;
+
+    --accent: 24 95% 53%;
+    --accent-foreground: 0 0% 100%;
+
+    --muted: 222 32% 15%;
+    --muted-foreground: 220 12% 65%;
+
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 220 20% 98%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 222 32% 18%;
+    --input: 222 32% 18%;
+    --ring: 24 95% 53%;
+
+    --gradient-brand: linear-gradient(135deg, hsl(222 47% 9%), hsl(217 91% 20%));
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.3);
+    --shadow-elevated: 0 10px 30px -10px hsl(0 0% 0% / 0.5);
+
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html, body, #root {
+    @apply h-full;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  h1, h2, h3, h4 {
+    font-family: 'Sora', -apple-system, sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer components {
+  .pp-card {
+    @apply bg-card text-card-foreground rounded-2xl border border-border/60 shadow-[var(--shadow-card)];
+  }
+  .pp-tile {
+    @apply bg-card rounded-2xl border border-border/60 p-4 transition-all hover:border-accent/40 hover:shadow-[var(--shadow-elevated)];
+  }
+  .pp-stat {
+    @apply bg-muted/50 rounded-xl p-3 text-center;
+  }
+  .pp-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium;
+  }
+}
+
+/* Custom scrollbar */
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / 0.3); border-radius: 3px; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}
