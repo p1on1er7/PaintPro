@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
+import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { registerPaintProPwa } from "@/lib/pwa";
 import "@fontsource/sora/400.css";
 import "@fontsource/sora/500.css";
@@ -13,4 +14,8 @@ import "@fontsource/manrope/700.css";
 
 registerPaintProPwa();
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <AppErrorBoundary>
+    <App />
+  </AppErrorBoundary>,
+);

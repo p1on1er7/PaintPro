@@ -1,13 +1,18 @@
 export function registerPaintProPwa() {
-  if (!import.meta.env.PROD) return;
+  if (typeof window === "undefined") return;
   if (!("serviceWorker" in navigator)) return;
 
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/sw.js")
-      .then((registration) => registration.update())
-      .catch((error) => {
-        console.error("PWA registration error:", error);
-      });
+  window.addEventListener("load", async () => {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+
+      if ("caches" in window) {
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
+      }
+    } catch (error) {
+      console.error("PWA cleanup error:", error);
+    }
   });
 }
