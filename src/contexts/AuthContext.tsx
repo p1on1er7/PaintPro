@@ -8,6 +8,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   sessionToken: string | null;
   loading: boolean;
+  authIssue: string | null;
   signOut: () => Promise<void>;
 }
 
@@ -15,6 +16,7 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   sessionToken: null,
   loading: true,
+  authIssue: null,
   signOut: async () => {},
 });
 
@@ -22,6 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authIssue, setAuthIssue] = useState<string | null>(null);
 
   useEffect(() => {
     if (isLocalDataMode) {
@@ -33,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         mode: "local",
       });
       setSessionToken(null);
+      setAuthIssue(null);
       setLoading(false);
       return;
     }
@@ -50,20 +54,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         : null;
 
-    // Set up listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSessionToken(s?.access_token ?? null);
-      setUser(mapCloudUser(s?.user ?? null));
-    });
-
-    // Then fetch existing
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSessionToken(s?.access_token ?? null);
-      setUser(mapCloudUser(s?.user ?? null));
+    let active = true;
+    const loadingTimeout = window.setTimeout(() => {
+      if (!active) return;
+      setAuthIssue("Timeout inizializzazione autenticazione cloud.");
       setLoading(false);
-    });
+    }, 8000);
 
-    return () => subscription.unsubscribe();
+    try {
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, s) => {
+        if (!active) return;
+        setSessionToken(s?.access_token ?? null);
+        setUser(mapCloudUser(s?.user ?? null));
+      });
+
+      supabase.auth
+        .getSession()
+        .then(({ data: { session: s } }) => {
+          if (!active) return;
+          setSessionToken(s?.access_token ?? null);
+          setUser(mapCloudUser(s?.user ?? null));
+          setAuthIssue(null);
+          setLoading(false);
+          window.clearTimeout(loadingTimeout);
+        })
+        .catch((error) => {
+          if (!active) return;
+          console.error("Auth bootstrap error:", error);
+          setAuthIssue(error instanceof Error ? error.message : "Errore autenticazione cloud.");
+          setLoading(false);
+          window.clearTimeout(loadingTimeout);
+        });
+
+      return () => {
+        active = false;
+        window.clearTimeout(loadingTimeout);
+        subscription.unsubscribe();
+      };
+    } catch (error) {
+      console.error("Auth setup error:", error);
+      setAuthIssue(error instanceof Error ? error.message : "Errore autenticazione cloud.");
+      setLoading(false);
+      window.clearTimeout(loadingTimeout);
+      return () => {
+        active = false;
+      };
+    }
   }, []);
 
   const signOut = async () => {
@@ -72,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, sessionToken, loading, signOut }}>
+    <AuthContext.Provider value={{ user, sessionToken, loading, authIssue, signOut }}>
       {children}
     </AuthContext.Provider>
   );
