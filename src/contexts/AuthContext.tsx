@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { isLocalDataMode } from "@/lib/app-config";
 import { AuthUser } from "@/lib/app-data";
 import { ensureLocalUser } from "@/lib/local-db";
-import { supabase } from "@/integrations/supabase/client";
+import { isSupabaseReady, supabase, supabaseInitError } from "@/integrations/supabase/client";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -53,6 +53,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             mode: "cloud" as const,
           }
         : null;
+
+    if (!isSupabaseReady) {
+      setAuthIssue(
+        supabaseInitError ??
+          "Supabase e' configurato in modo non valido. Controlla VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY su Vercel.",
+      );
+      setLoading(false);
+      return;
+    }
 
     let active = true;
     const loadingTimeout = window.setTimeout(() => {

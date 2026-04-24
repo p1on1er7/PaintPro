@@ -5,25 +5,45 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 export const isSupabaseAvailable = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
+export let supabaseInitError: string | null = null;
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-const missingSupabaseClient = new Proxy(
-  {},
-  {
-    get() {
-      throw new Error("Supabase non configurato. Imposta VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY oppure usa la modalita' locale.");
+function createMissingSupabaseClient(message: string) {
+  return new Proxy(
+    {},
+    {
+      get() {
+        throw new Error(message);
+      },
     },
-  },
-) as SupabaseClient<Database>;
+  ) as SupabaseClient<Database>;
+}
 
-export const supabase = isSupabaseAvailable
-  ? createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+function buildSupabaseClient() {
+  if (!isSupabaseAvailable) {
+    return createMissingSupabaseClient(
+      "Supabase non configurato. Imposta VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY oppure usa la modalita' locale.",
+    );
+  }
+
+  try {
+    return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
       auth: {
-        storage: localStorage,
+        storage: typeof window !== "undefined" ? window.localStorage : undefined,
         persistSession: true,
         autoRefreshToken: true,
       },
-    })
-  : missingSupabaseClient;
+    });
+  } catch (error) {
+    supabaseInitError = error instanceof Error ? error.message : "Errore inizializzazione Supabase.";
+    console.error("Supabase init error:", error);
+    return createMissingSupabaseClient(
+      `Configurazione Supabase non valida: ${supabaseInitError}`,
+    );
+  }
+}
+
+export const supabase = buildSupabaseClient();
+export const isSupabaseReady = isSupabaseAvailable && !supabaseInitError;
