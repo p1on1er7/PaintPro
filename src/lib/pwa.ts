@@ -3,8 +3,11 @@ export function registerPaintProPwa() {
   if (!("serviceWorker" in navigator)) return;
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((error) => {
-      console.error("PWA registration error:", error);
-    });
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((registration) => registration.update())
+      .catch((error) => {
+        console.error("PWA registration error:", error);
+      });
   });
 }

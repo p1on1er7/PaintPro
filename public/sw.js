@@ -1,6 +1,5 @@
-const CACHE_NAME = "paintpro-pwa-v1";
-const APP_SHELL = [
-  "/",
+const CACHE_NAME = "paintpro-pwa-v2";
+const STATIC_ASSETS = [
   "/manifest.webmanifest",
   "/favicon.ico",
   "/icons/icon-192.png",
@@ -10,7 +9,7 @@ const APP_SHELL = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()),
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).then(() => self.skipWaiting()),
   );
 });
 
@@ -30,28 +29,24 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
 
-  if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("/", copy));
-          return response;
-        })
-        .catch(async () => (await caches.match("/")) || Response.error()),
-    );
-    return;
-  }
-
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-
-      return fetch(request).then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+    fetch(request)
+      .then((response) => {
+        if (response.ok && !url.pathname.endsWith("/sw.js")) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
         return response;
-      });
-    }),
+      })
+      .catch(async () => {
+        const cached = await caches.match(request);
+        if (cached) return cached;
+
+        if (request.mode === "navigate") {
+          return (await caches.match("/")) || Response.error();
+        }
+
+        return Response.error();
+      }),
   );
 });
