@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, supabaseProjectHost, testSupabaseConnection } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,8 @@ export default function Auth() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [diagnostic, setDiagnostic] = useState<string | null>(null);
+  const [checkingSupabase, setCheckingSupabase] = useState(false);
 
   if (loading) {
     return (
@@ -52,9 +54,25 @@ export default function Auth() {
         toast.success("Bentornato!");
       }
     } catch (err: any) {
-      toast.error(err?.message ?? "Errore");
+      const message = err?.message ?? "Errore";
+      toast.error(message);
+      setDiagnostic(message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const runDiagnostic = async () => {
+    setCheckingSupabase(true);
+    try {
+      const result = await testSupabaseConnection();
+      const details = [`Host configurato: ${supabaseProjectHost}`, result.message];
+      if (result.endpoint) details.push(`Endpoint testato: ${result.endpoint}`);
+      setDiagnostic(details.join("\n"));
+      if (result.ok) toast.success("Supabase raggiungibile");
+      else toast.error("Supabase non raggiungibile");
+    } finally {
+      setCheckingSupabase(false);
     }
   };
 
@@ -130,6 +148,22 @@ export default function Auth() {
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "signin" ? "Accedi" : "Crea account"}
             </Button>
           </form>
+
+          {diagnostic && (
+            <div className="mt-4 rounded-lg border border-border bg-muted p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+              {diagnostic}
+            </div>
+          )}
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={runDiagnostic}
+            disabled={checkingSupabase}
+            className="mt-3 w-full"
+          >
+            {checkingSupabase ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verifica connessione Supabase"}
+          </Button>
         </Card>
         <p className="text-center text-xs text-muted-foreground mt-6">
           Tutti i tuoi dati sono salvati in cloud, sicuri e privati.

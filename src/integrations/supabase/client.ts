@@ -2,10 +2,17 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
 export const isSupabaseAvailable = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
 export let supabaseInitError: string | null = null;
+export const supabaseProjectHost = (() => {
+  try {
+    return SUPABASE_URL ? new URL(SUPABASE_URL).host : "non configurato";
+  } catch {
+    return "URL non valido";
+  }
+})();
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
@@ -29,6 +36,8 @@ function buildSupabaseClient() {
   }
 
   try {
+    new URL(SUPABASE_URL);
+
     return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
       auth: {
         storage: typeof window !== "undefined" ? window.localStorage : undefined,
@@ -47,3 +56,57 @@ function buildSupabaseClient() {
 
 export const supabase = buildSupabaseClient();
 export const isSupabaseReady = isSupabaseAvailable && !supabaseInitError;
+
+export async function testSupabaseConnection() {
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+    return {
+      ok: false,
+      message: "Mancano VITE_SUPABASE_URL o VITE_SUPABASE_PUBLISHABLE_KEY su Vercel.",
+      endpoint: "",
+    };
+  }
+
+  let endpoint = "";
+  try {
+    const baseUrl = new URL(SUPABASE_URL);
+    endpoint = `${baseUrl.origin}/auth/v1/health`;
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 12000);
+    const response = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+      },
+      signal: controller.signal,
+    });
+    window.clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        message: `Supabase risponde, ma con stato ${response.status}. Controlla che la chiave sia la anon/publishable key del progetto giusto.`,
+        endpoint,
+      };
+    }
+
+    return {
+      ok: true,
+      message: "Connessione Supabase raggiungibile. Se il login fallisce ancora, il problema e' nelle impostazioni Auth.",
+      endpoint,
+    };
+  } catch (error) {
+    const message =
+      error instanceof DOMException && error.name === "AbortError"
+        ? "Timeout: il progetto Supabase non risponde entro 12 secondi."
+        : error instanceof Error
+          ? error.message
+          : "Errore rete verso Supabase.";
+
+    return {
+      ok: false,
+      message: `Fetch verso Supabase fallito: ${message}`,
+      endpoint,
+    };
+  }
+}
