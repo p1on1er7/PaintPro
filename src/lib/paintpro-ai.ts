@@ -1,5 +1,13 @@
 import { supabase } from "@/integrations/supabase/client";
 import { appConfig, hasAiBackend, hasLocalImageApi } from "@/lib/app-config";
+import {
+  listEventi,
+  listLogisticaItems,
+  listPreventivi,
+  type EventoRecord,
+  type LogisticaItemRecord,
+  type PreventivoRecord,
+} from "@/lib/app-data";
 
 export type AssistantImage = {
   url: string;
@@ -28,6 +36,14 @@ type CachedResponse = AssistantResponse & {
 const CACHE_KEY = "paintpro.ai-cache.v1";
 const MAX_CACHE_ITEMS = 40;
 const MAX_REMOTE_MESSAGES = 6;
+const MAX_CONTEXT_ITEMS = 18;
+
+const LOGISTICA_LABELS: Record<string, string> = {
+  attrezzatura: "Attrezzi e strumenti",
+  colori: "Vernici e materiali",
+  spesa: "Lista spesa",
+  storico: "Storico acquisti",
+};
 
 function normalizeText(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
@@ -67,6 +83,116 @@ function saveCachedResponse(key: string, response: AssistantResponse) {
 
 function findCachedResponse(key: string) {
   return readCache().find((item) => item.key === key) ?? null;
+}
+
+function isAppDataQuestion(text: string) {
+  const normalized = normalizeText(text);
+  return /(logistica|attrezz|strument|vernici|material|spesa|storico|preventiv|calendari|agenda|appuntament|lavori|cantiere|cosa ho|che cosa ho|elenco|lista)/.test(
+    normalized,
+  );
+}
+
+function formatCurrency(value: number | null | undefined) {
+  if (value == null || Number.isNaN(Number(value))) return "";
+  return `EUR ${Number(value).toFixed(2)}`;
+}
+
+function formatLogistica(items: LogisticaItemRecord[]) {
+  if (items.length === 0) return "Non hai ancora elementi salvati in logistica.";
+
+  const grouped = items.reduce<Record<string, LogisticaItemRecord[]>>((acc, item) => {
+    (acc[item.category] ??= []).push(item);
+    return acc;
+  }, {});
+
+  const lines = ["**Logistica salvata:**"];
+  Object.entries(grouped).forEach(([category, categoryItems]) => {
+    lines.push(`\n**${LOGISTICA_LABELS[category] ?? category} (${categoryItems.length})**`);
+    categoryItems.slice(0, MAX_CONTEXT_ITEMS).forEach((item) => {
+      const parts = [
+        item.quantity != null ? `${item.quantity} ${item.unit ?? ""}`.trim() : "",
+        item.metadata?.brand ? String(item.metadata.brand) : "",
+        item.metadata?.code ? String(item.metadata.code) : "",
+        formatCurrency(item.price),
+      ].filter(Boolean);
+      lines.push(`- ${item.name}${parts.length ? ` (${parts.join(" | ")})` : ""}`);
+    });
+  });
+
+  return lines.join("\n");
+}
+
+function formatPreventivi(preventivi: PreventivoRecord[]) {
+  if (preventivi.length === 0) return "Non hai ancora preventivi salvati.";
+
+  const total = preventivi.reduce((sum, item) => sum + Number(item.totale ?? 0), 0);
+  const lines = [`**Preventivi salvati:** ${preventivi.length} preventivi, totale ${formatCurrency(total)}.`];
+  preventivi.slice(0, 8).forEach((item) => {
+    const date = item.data_lavoro ? `, data ${new Date(item.data_lavoro).toLocaleDateString("it-IT")}` : "";
+    lines.push(`- ${item.cliente}: ${formatCurrency(Number(item.totale))}${date}`);
+  });
+  return lines.join("\n");
+}
+
+function formatCalendario(eventi: EventoRecord[]) {
+  if (eventi.length === 0) return "Non hai ancora eventi in calendario.";
+
+  const now = Date.now();
+  const upcoming = eventi
+    .filter((item) => new Date(item.data_inizio).getTime() >= now - 24 * 60 * 60 * 1000)
+    .slice(0, 8);
+  const list = upcoming.length ? upcoming : eventi.slice(0, 8);
+
+  const lines = ["**Prossimi eventi in calendario:**"];
+  list.forEach((item) => {
+    const date = new Date(item.data_inizio);
+    const when = `${date.toLocaleDateString("it-IT")} ${date.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`;
+    lines.push(`- ${item.titolo}: ${when}${item.cliente ? `, cliente ${item.cliente}` : ""}${item.luogo ? `, luogo ${item.luogo}` : ""}`);
+  });
+  return lines.join("\n");
+}
+
+async function buildAppDataAnswer(prompt: string) {
+  if (!isAppDataQuestion(prompt)) return null;
+
+  const normalized = normalizeText(prompt);
+  const wantsLogistica = /(logistica|attrezz|strument|vernici|material|spesa|storico|cosa ho|che cosa ho|elenco|lista)/.test(normalized);
+  const wantsPreventivi = /preventiv|cliente|prezzo|costo|totale/.test(normalized);
+  const wantsCalendario = /calendari|agenda|appuntament|lavori|cantiere|quando/.test(normalized);
+
+  const sections: string[] = [];
+  if (wantsLogistica || (!wantsPreventivi && !wantsCalendario)) {
+    sections.push(formatLogistica(await listLogisticaItems()));
+  }
+  if (wantsPreventivi) {
+    sections.push(formatPreventivi(await listPreventivi()));
+  }
+  if (wantsCalendario) {
+    sections.push(formatCalendario(await listEventi()));
+  }
+
+  return sections.join("\n\n");
+}
+
+async function buildAppContextForAi(prompt: string) {
+  if (!isAppDataQuestion(prompt)) return "";
+
+  try {
+    const [logistica, preventivi, eventi] = await Promise.all([
+      listLogisticaItems(),
+      listPreventivi(),
+      listEventi(),
+    ]);
+
+    return [
+      "Contesto gestionale PaintPro dell'utente. Usa questi dati solo se pertinenti alla domanda.",
+      formatLogistica(logistica),
+      formatPreventivi(preventivi),
+      formatCalendario(eventi),
+    ].join("\n\n");
+  } catch {
+    return "";
+  }
 }
 
 function extractArea(prompt: string) {
@@ -221,13 +347,14 @@ async function callLocalImageApi(prompt: string, photoDataUrl: string | null) {
   return String(data.url ?? data.image_url ?? data.image ?? data.dataUrl ?? "").trim();
 }
 
-async function callHostedAi(messages: AssistantMessage[], photoDataUrl: string | null) {
+async function callHostedAi(messages: AssistantMessage[], photoDataUrl: string | null, appContext: string) {
   const response = await fetch(appConfig.aiBackendUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       messages: messages.slice(-MAX_REMOTE_MESSAGES),
       sourceImage: photoDataUrl,
+      appContext,
     }),
   });
 
@@ -240,8 +367,10 @@ async function callHostedAi(messages: AssistantMessage[], photoDataUrl: string |
 }
 
 export async function sendPaintProChat(messages: AssistantMessage[], photoDataUrl: string | null): Promise<AssistantResponse> {
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+  const wantsAppData = isAppDataQuestion(lastUserMessage);
   const cacheKey = buildCacheKey(messages, photoDataUrl);
-  const cached = findCachedResponse(cacheKey);
+  const cached = wantsAppData ? null : findCachedResponse(cacheKey);
   if (cached) {
     return {
       content: cached.content,
@@ -251,9 +380,20 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
     };
   }
 
-  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const wantsImage = isImageRequest(lastUserMessage);
+  const appDataAnswer = !wantsImage ? await buildAppDataAnswer(lastUserMessage) : null;
+  const appContext = !wantsImage ? await buildAppContextForAi(lastUserMessage) : "";
   const localRule = buildRuleBasedAnswer(lastUserMessage, Boolean(photoDataUrl));
+
+  if (appDataAnswer) {
+    const response: AssistantResponse = {
+      content: appDataAnswer,
+      image: null,
+      savedToHistory: false,
+      source: "local-rules",
+    };
+    return response;
+  }
 
   if (localRule && !wantsImage) {
     const response: AssistantResponse = {
@@ -284,6 +424,32 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
     }
   }
 
+  if (wantsImage && hasAiBackend) {
+    try {
+      const data = await callHostedAi(messages, photoDataUrl, "");
+      const response: AssistantResponse = {
+        content: data.content || "Ecco l'anteprima.",
+        image: data.image ?? null,
+        savedToHistory: Boolean(data.savedToHistory),
+        source: "cloud-api",
+      };
+      saveCachedResponse(cacheKey, response);
+      return response;
+    } catch (error) {
+      const response: AssistantResponse = {
+        content:
+          `Non sono riuscito a generare l'immagine dal backend AI.\n\n` +
+          `Dettaglio: ${error instanceof Error ? error.message : "errore sconosciuto"}\n\n` +
+          "Controlla su Vercel `OPENAI_API_KEY`, `OPENAI_IMAGE_MODEL`, `OPENAI_IMAGE_SIZE`, `OPENAI_IMAGE_QUALITY` e poi fai redeploy.",
+        image: null,
+        savedToHistory: false,
+        source: "offline",
+      };
+      saveCachedResponse(cacheKey, response);
+      return response;
+    }
+  }
+
   if (!wantsImage && appConfig.preferLocalAi) {
     try {
       const content = await callOllama(messages.slice(-MAX_REMOTE_MESSAGES));
@@ -305,7 +471,7 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
   if (appConfig.useCloudAi) {
     if (hasAiBackend) {
       try {
-        const data = await callHostedAi(messages, photoDataUrl);
+        const data = await callHostedAi(messages, photoDataUrl, appContext);
         const response: AssistantResponse = {
           content: data.content || "Non ho ricevuto una risposta valida.",
           image: data.image ?? null,

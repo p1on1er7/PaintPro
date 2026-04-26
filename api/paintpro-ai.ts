@@ -26,6 +26,11 @@ function looksLikeImageRequest(text: string) {
   return IMAGE_PATTERN.test(text);
 }
 
+function buildInstructions(appContext: string) {
+  const context = typeof appContext === "string" && appContext.trim() ? `\n\n${appContext.trim()}` : "";
+  return `${SYSTEM_PROMPT}${context}`;
+}
+
 function extractTextContent(input: unknown) {
   if (typeof input === "string") return input;
   if (Array.isArray(input)) {
@@ -48,7 +53,7 @@ async function dataUrlToFile(dataUrl: string, fileName: string) {
   return new File([blob], fileName, { type: blob.type || "image/jpeg" });
 }
 
-async function callOpenAiText(messages: Array<{ role: string; content: string }>) {
+async function callOpenAiText(messages: Array<{ role: string; content: string }>, appContext: string) {
   const apiKey = getEnv("OPENAI_API_KEY");
   const model = getEnv("OPENAI_TEXT_MODEL", "gpt-5-nano");
 
@@ -60,14 +65,12 @@ async function callOpenAiText(messages: Array<{ role: string; content: string }>
     },
     body: JSON.stringify({
       model,
-      input: [
-        { role: "system", content: SYSTEM_PROMPT },
-        ...messages.map((message) => ({
-          role: message.role,
-          content: [{ type: "input_text", text: message.content }],
-        })),
-      ],
-      max_output_tokens: 500,
+      instructions: buildInstructions(appContext),
+      input: messages.map((message) => ({
+        role: message.role === "assistant" ? "assistant" : "user",
+        content: [{ type: message.role === "assistant" ? "output_text" : "input_text", text: message.content }],
+      })),
+      max_output_tokens: 700,
     }),
   });
 
@@ -86,6 +89,12 @@ async function callOpenAiImage(prompt: string, sourceImage: string | null) {
   const size = getEnv("OPENAI_IMAGE_SIZE", "1024x1024");
   const quality = getEnv("OPENAI_IMAGE_QUALITY", "low");
   const format = getEnv("OPENAI_IMAGE_FORMAT", "png");
+  const finalPrompt = [
+    "Crea un'anteprima realistica per un lavoro da decoratore/imbianchino.",
+    "Mantieni proporzioni credibili, luce naturale, pareti e superfici realistiche.",
+    "Non aggiungere testo, loghi o scritte nell'immagine.",
+    prompt,
+  ].join("\n");
 
   if (!sourceImage) {
     const response = await fetch("https://api.openai.com/v1/images/generations", {
@@ -96,7 +105,7 @@ async function callOpenAiImage(prompt: string, sourceImage: string | null) {
       },
       body: JSON.stringify({
         model,
-        prompt,
+        prompt: finalPrompt,
         size,
         quality,
         output_format: format,
@@ -117,7 +126,7 @@ async function callOpenAiImage(prompt: string, sourceImage: string | null) {
   const file = await dataUrlToFile(sourceImage, "source-image.jpg");
   const formData = new FormData();
   formData.append("model", model);
-  formData.append("prompt", prompt);
+  formData.append("prompt", finalPrompt);
   formData.append("size", size);
   formData.append("quality", quality);
   formData.append("output_format", format);
@@ -151,7 +160,7 @@ export default async function handler(request: Request) {
   }
 
   try {
-    const { messages = [], sourceImage = null } = await request.json();
+    const { messages = [], sourceImage = null, appContext = "" } = await request.json();
     const safeMessages = Array.isArray(messages)
       ? messages
           .filter((message) => message && typeof message.content === "string" && typeof message.role === "string")
@@ -182,7 +191,7 @@ export default async function handler(request: Request) {
       });
     }
 
-    const textResult = await callOpenAiText(safeMessages);
+    const textResult = await callOpenAiText(safeMessages, String(appContext || ""));
     if ("error" in textResult) {
       return json({ error: textResult.error }, textResult.status || 500);
     }
