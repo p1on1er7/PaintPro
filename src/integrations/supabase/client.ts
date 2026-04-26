@@ -14,6 +14,21 @@ export const supabaseProjectHost = (() => {
   }
 })();
 
+function looksLikeServiceRoleKey(key?: string) {
+  if (!key) return false;
+
+  try {
+    const [, payload] = key.split(".");
+    if (!payload) return false;
+
+    const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = JSON.parse(window.atob(normalizedPayload)) as { role?: string };
+    return decoded.role === "service_role";
+  } catch {
+    return key.includes("service_role");
+  }
+}
+
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
@@ -37,6 +52,12 @@ function buildSupabaseClient() {
 
   try {
     new URL(SUPABASE_URL);
+
+    if (looksLikeServiceRoleKey(SUPABASE_PUBLISHABLE_KEY)) {
+      throw new Error(
+        "Hai inserito una chiave service_role nel frontend. Usa solo la publishable/anon public key e ruota subito la service_role da Supabase.",
+      );
+    }
 
     return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
       auth: {
