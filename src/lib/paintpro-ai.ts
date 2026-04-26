@@ -33,7 +33,7 @@ type CachedResponse = AssistantResponse & {
   createdAt: string;
 };
 
-const CACHE_KEY = "paintpro.ai-cache.v1";
+const CACHE_KEY = "paintpro.ai-cache.v2";
 const MAX_CACHE_ITEMS = 40;
 const MAX_REMOTE_MESSAGES = 6;
 const MAX_CONTEXT_ITEMS = 18;
@@ -51,7 +51,9 @@ function normalizeText(value: string) {
 
 function isImageRequest(text: string) {
   const normalized = normalizeText(text);
-  return /(genera|simula|mostra|anteprima|render|vedere|preview|fammi vedere)/.test(normalized);
+  return /(genera|simula|mostra|anteprima|render|vedere|preview|fammi vedere|immagine|foto|colora|visualizza|trasforma)/.test(
+    normalized,
+  );
 }
 
 function readCache(): CachedResponse[] {
@@ -87,7 +89,7 @@ function findCachedResponse(key: string) {
 
 function isAppDataQuestion(text: string) {
   const normalized = normalizeText(text);
-  return /(logistica|attrezz|strument|vernici|material|spesa|storico|preventiv|calendari|agenda|appuntament|lavori|cantiere|cosa ho|che cosa ho|elenco|lista)/.test(
+  return /(logistica|attrezz|strument|vernici|material|spesa|storico|preventiv|offert|calendari|agenda|appuntament|lavori|cantiere|commess|cliente|clienti|domani|oggi|settimana|mese|scaden|cosa ho|che cosa ho|cosa devo|che devo|elenco|lista|mostrami|dimmi)/.test(
     normalized,
   );
 }
@@ -156,9 +158,13 @@ async function buildAppDataAnswer(prompt: string) {
   if (!isAppDataQuestion(prompt)) return null;
 
   const normalized = normalizeText(prompt);
-  const wantsLogistica = /(logistica|attrezz|strument|vernici|material|spesa|storico|cosa ho|che cosa ho|elenco|lista)/.test(normalized);
-  const wantsPreventivi = /preventiv|cliente|prezzo|costo|totale/.test(normalized);
-  const wantsCalendario = /calendari|agenda|appuntament|lavori|cantiere|quando/.test(normalized);
+  const wantsLogistica = /(logistica|attrezz|strument|vernici|material|spesa|storico|magazzino|cosa ho|che cosa ho|elenco|lista|mostrami)/.test(
+    normalized,
+  );
+  const wantsPreventivi = /preventiv|offert|cliente|clienti|prezzo|costo|totale/.test(normalized);
+  const wantsCalendario = /calendari|agenda|appuntament|lavori|cantiere|quando|oggi|domani|settimana|mese|scaden|cosa devo|che devo/.test(
+    normalized,
+  );
 
   const sections: string[] = [];
   if (wantsLogistica || (!wantsPreventivi && !wantsCalendario)) {
@@ -369,8 +375,9 @@ async function callHostedAi(messages: AssistantMessage[], photoDataUrl: string |
 export async function sendPaintProChat(messages: AssistantMessage[], photoDataUrl: string | null): Promise<AssistantResponse> {
   const lastUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const wantsAppData = isAppDataQuestion(lastUserMessage);
+  const wantsImage = isImageRequest(lastUserMessage);
   const cacheKey = buildCacheKey(messages, photoDataUrl);
-  const cached = wantsAppData ? null : findCachedResponse(cacheKey);
+  const cached = wantsAppData || wantsImage ? null : findCachedResponse(cacheKey);
   if (cached) {
     return {
       content: cached.content,
@@ -380,7 +387,6 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
     };
   }
 
-  const wantsImage = isImageRequest(lastUserMessage);
   const appDataAnswer = !wantsImage ? await buildAppDataAnswer(lastUserMessage) : null;
   const appContext = !wantsImage ? await buildAppContextForAi(lastUserMessage) : "";
   const localRule = buildRuleBasedAnswer(lastUserMessage, Boolean(photoDataUrl));
@@ -445,7 +451,6 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
         savedToHistory: false,
         source: "offline",
       };
-      saveCachedResponse(cacheKey, response);
       return response;
     }
   }
@@ -512,14 +517,23 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
 
   const fallback: AssistantResponse = {
     content: wantsImage
-      ? "In questo momento posso evitare il cloud, ma per generare immagini ti serve un endpoint configurato in `VITE_AI_BACKEND_URL` o `VITE_LOCAL_IMAGE_API_URL`."
+      ? [
+          "Generazione immagini non partita per configurazione AI incompleta.",
+          `Backend letto dall'app: ${hasAiBackend ? appConfig.aiBackendUrl : "mancante"}.`,
+          `Modalita AI letta dall'app: ${appConfig.aiMode}.`,
+          "Su Vercel controlla `VITE_AI_BACKEND_URL=/api/paintpro-ai` e poi fai redeploy.",
+        ].join("\n")
       : localRule ??
-        "Modalita' locale attiva: posso rispondere con regole rapide e cache locale. Per risposte piu' libere configura Ollama o il backend AI.",
+        [
+          "Non riesco a usare il backend AI in questo deploy.",
+          `Backend letto dall'app: ${hasAiBackend ? appConfig.aiBackendUrl : "mancante"}.`,
+          `Modalita AI letta dall'app: ${appConfig.aiMode}.`,
+          "Controlla `VITE_AI_MODE=cloud` e `VITE_AI_BACKEND_URL=/api/paintpro-ai` su Vercel, poi fai redeploy.",
+        ].join("\n"),
     image: null,
     savedToHistory: false,
     source: "offline",
   };
 
-  saveCachedResponse(cacheKey, fallback);
   return fallback;
 }

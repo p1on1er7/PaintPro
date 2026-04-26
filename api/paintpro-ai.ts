@@ -68,7 +68,7 @@ async function callOpenAiText(messages: Array<{ role: string; content: string }>
       instructions: buildInstructions(appContext),
       input: messages.map((message) => ({
         role: message.role === "assistant" ? "assistant" : "user",
-        content: [{ type: message.role === "assistant" ? "output_text" : "input_text", text: message.content }],
+        content: message.content,
       })),
       max_output_tokens: 700,
     }),

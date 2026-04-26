@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { appConfig } from "@/lib/app-config";
+import { appConfig, hasAiBackend } from "@/lib/app-config";
 import {
   deleteGeneratedImage,
   listGeneratedImages,
@@ -234,7 +234,7 @@ export default function Scanner() {
           <Sparkles className="h-4 w-4 text-accent" />
           <h2 className="font-semibold">Assistente tuttofare</h2>
           <span className="text-[10px] text-muted-foreground ml-auto">
-            dati {appConfig.appMode} • AI {appConfig.aiMode}
+            dati {appConfig.appMode} • AI {appConfig.aiMode} • backend {hasAiBackend ? "ok" : "mancante"}
           </span>
         </div>
 
