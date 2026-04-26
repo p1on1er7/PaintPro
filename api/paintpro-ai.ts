@@ -22,6 +22,10 @@ function getEnv(name: string, fallback = "") {
   return typeof process !== "undefined" ? process.env[name] ?? fallback : fallback;
 }
 
+function uniqueValues(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
 function looksLikeImageRequest(text: string) {
   return IMAGE_PATTERN.test(text);
 }
@@ -51,6 +55,18 @@ async function dataUrlToFile(dataUrl: string, fileName: string) {
   const response = await fetch(dataUrl);
   const blob = await response.blob();
   return new File([blob], fileName, { type: blob.type || "image/jpeg" });
+}
+
+async function parseOpenAiError(response: Response) {
+  const raw = await response.text();
+  try {
+    const parsed = JSON.parse(raw) as { error?: { message?: string; code?: string; type?: string } };
+    const message = parsed.error?.message || raw;
+    const code = parsed.error?.code ? ` (${parsed.error.code})` : "";
+    return `${message}${code}`;
+  } catch {
+    return raw || `Errore OpenAI ${response.status}`;
+  }
 }
 
 async function callOpenAiText(messages: Array<{ role: string; content: string }>, appContext: string) {
@@ -85,7 +101,8 @@ async function callOpenAiText(messages: Array<{ role: string; content: string }>
 
 async function callOpenAiImage(prompt: string, sourceImage: string | null) {
   const apiKey = getEnv("OPENAI_API_KEY");
-  const model = getEnv("OPENAI_IMAGE_MODEL", "gpt-image-1");
+  const configuredModel = getEnv("OPENAI_IMAGE_MODEL", "gpt-image-1-mini");
+  const models = uniqueValues([configuredModel, "gpt-image-1-mini", "gpt-image-1"]);
   const size = getEnv("OPENAI_IMAGE_SIZE", "1024x1024");
   const quality = getEnv("OPENAI_IMAGE_QUALITY", "low");
   const format = getEnv("OPENAI_IMAGE_FORMAT", "png");
@@ -96,7 +113,10 @@ async function callOpenAiImage(prompt: string, sourceImage: string | null) {
     prompt,
   ].join("\n");
 
-  if (!sourceImage) {
+  let lastError = "";
+
+  for (const model of models) {
+    if (!sourceImage) {
     const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
@@ -113,46 +133,75 @@ async function callOpenAiImage(prompt: string, sourceImage: string | null) {
     });
 
     if (!response.ok) {
-      return { error: await response.text(), status: response.status };
+      lastError = `${model}: ${await parseOpenAiError(response)}`;
+      continue;
     }
 
     const data = await response.json();
     const base64 = data.data?.[0]?.b64_json;
-    if (!base64) return { error: "Nessuna immagine generata", status: 500 };
+    const url = data.data?.[0]?.url;
+    if (!base64 && !url) {
+      lastError = `${model}: nessuna immagine generata`;
+      continue;
+    }
 
-    return { url: `data:image/${format};base64,${base64}` };
+    return { url: base64 ? `data:image/${format};base64,${base64}` : url };
+    }
+
+    const file = await dataUrlToFile(sourceImage, "source-image.jpg");
+    const formData = new FormData();
+    formData.append("model", model);
+    formData.append("prompt", finalPrompt);
+    formData.append("size", size);
+    formData.append("quality", quality);
+    formData.append("output_format", format);
+    formData.append("image", file);
+
+    const response = await fetch("https://api.openai.com/v1/images/edits", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      lastError = `${model}: ${await parseOpenAiError(response)}`;
+      continue;
+    }
+
+    const data = await response.json();
+    const base64 = data.data?.[0]?.b64_json;
+    const url = data.data?.[0]?.url;
+    if (!base64 && !url) {
+      lastError = `${model}: nessuna immagine generata`;
+      continue;
+    }
+
+    return { url: base64 ? `data:image/${format};base64,${base64}` : url };
   }
 
-  const file = await dataUrlToFile(sourceImage, "source-image.jpg");
-  const formData = new FormData();
-  formData.append("model", model);
-  formData.append("prompt", finalPrompt);
-  formData.append("size", size);
-  formData.append("quality", quality);
-  formData.append("output_format", format);
-  formData.append("image", file);
-
-  const response = await fetch("https://api.openai.com/v1/images/edits", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    return { error: await response.text(), status: response.status };
-  }
-
-  const data = await response.json();
-  const base64 = data.data?.[0]?.b64_json;
-  if (!base64) return { error: "Nessuna immagine generata", status: 500 };
-
-  return { url: `data:image/${format};base64,${base64}` };
+  return {
+    error:
+      `${lastError || "Nessun modello immagine disponibile."} ` +
+      "Se il messaggio parla di organization verification, completa la verifica dell'organizzazione OpenAI o usa un modello immagini abilitato sul tuo account.",
+    status: 500,
+  };
 }
 
 export default async function handler(request: Request) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204 });
+  if (request.method === "GET") {
+    return json({
+      ok: true,
+      openaiKeyConfigured: Boolean(getEnv("OPENAI_API_KEY")),
+      textModel: getEnv("OPENAI_TEXT_MODEL", "gpt-5-nano"),
+      imageModel: getEnv("OPENAI_IMAGE_MODEL", "gpt-image-1-mini"),
+      imageSize: getEnv("OPENAI_IMAGE_SIZE", "1024x1024"),
+      imageQuality: getEnv("OPENAI_IMAGE_QUALITY", "low"),
+      imageFormat: getEnv("OPENAI_IMAGE_FORMAT", "png"),
+    });
+  }
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   if (!getEnv("OPENAI_API_KEY")) {

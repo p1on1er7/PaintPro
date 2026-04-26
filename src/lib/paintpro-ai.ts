@@ -35,8 +35,8 @@ type CachedResponse = AssistantResponse & {
 
 const CACHE_KEY = "paintpro.ai-cache.v2";
 const MAX_CACHE_ITEMS = 40;
-const MAX_REMOTE_MESSAGES = 6;
-const MAX_CONTEXT_ITEMS = 18;
+const MAX_REMOTE_MESSAGES = 8;
+const MAX_CONTEXT_ITEMS = 30;
 
 const LOGISTICA_LABELS: Record<string, string> = {
   attrezzatura: "Attrezzi e strumenti",
@@ -89,8 +89,18 @@ function findCachedResponse(key: string) {
 
 function isAppDataQuestion(text: string) {
   const normalized = normalizeText(text);
-  return /(logistica|attrezz|strument|vernici|material|spesa|storico|preventiv|offert|calendari|agenda|appuntament|lavori|cantiere|commess|cliente|clienti|domani|oggi|settimana|mese|scaden|cosa ho|che cosa ho|cosa devo|che devo|elenco|lista|mostrami|dimmi)/.test(
+  return /(logistica|attrezz|strument|vernici|material|spesa|storico|magazzino|preventiv|offert|calendari|agenda|appuntament|lavori|cantiere|commess|cliente|clienti|domani|oggi|settimana|mese|scaden|cosa ho|che cosa ho|cosa devo|che devo|elenco|lista|mostrami|dimmi|organizza|riassumi|controlla|analizza|manca|mancano|preparare|comprare|acquistare)/.test(
     normalized,
+  );
+}
+
+function shouldPreferCloudReasoning(text: string) {
+  const normalized = normalizeText(text);
+  return (
+    isAppDataQuestion(text) ||
+    /(consigli|consiglio|come faccio|cosa mi conviene|organizza|pianifica|analizza|riassumi|preparami|scrivimi|calcola|stima|ciclo|procedura|materiali per|lista per|preventivo per)/.test(
+      normalized,
+    )
   );
 }
 
@@ -124,6 +134,32 @@ function formatLogistica(items: LogisticaItemRecord[]) {
   return lines.join("\n");
 }
 
+function filterEventsByTimeHint(eventi: EventoRecord[], prompt: string) {
+  const normalized = normalizeText(prompt);
+  const today = new Date();
+  const start = new Date(today);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+
+  if (/domani/.test(normalized)) {
+    start.setDate(start.getDate() + 1);
+    end.setDate(start.getDate() + 1);
+  } else if (/oggi/.test(normalized)) {
+    end.setDate(start.getDate() + 1);
+  } else if (/settimana/.test(normalized)) {
+    end.setDate(start.getDate() + 7);
+  } else if (/mese/.test(normalized)) {
+    end.setMonth(start.getMonth() + 1);
+  } else {
+    return eventi;
+  }
+
+  return eventi.filter((item) => {
+    const time = new Date(item.data_inizio).getTime();
+    return time >= start.getTime() && time < end.getTime();
+  });
+}
+
 function formatPreventivi(preventivi: PreventivoRecord[]) {
   if (preventivi.length === 0) return "Non hai ancora preventivi salvati.";
 
@@ -136,14 +172,17 @@ function formatPreventivi(preventivi: PreventivoRecord[]) {
   return lines.join("\n");
 }
 
-function formatCalendario(eventi: EventoRecord[]) {
-  if (eventi.length === 0) return "Non hai ancora eventi in calendario.";
+function formatCalendario(eventi: EventoRecord[], prompt = "") {
+  const filtered = filterEventsByTimeHint(eventi, prompt);
+  const source = filtered.length || prompt ? filtered : eventi;
+
+  if (source.length === 0) return "Non ho trovato eventi in calendario per questa richiesta.";
 
   const now = Date.now();
-  const upcoming = eventi
+  const upcoming = source
     .filter((item) => new Date(item.data_inizio).getTime() >= now - 24 * 60 * 60 * 1000)
     .slice(0, 8);
-  const list = upcoming.length ? upcoming : eventi.slice(0, 8);
+  const list = upcoming.length ? upcoming : source.slice(0, 8);
 
   const lines = ["**Prossimi eventi in calendario:**"];
   list.forEach((item) => {
@@ -174,7 +213,7 @@ async function buildAppDataAnswer(prompt: string) {
     sections.push(formatPreventivi(await listPreventivi()));
   }
   if (wantsCalendario) {
-    sections.push(formatCalendario(await listEventi()));
+    sections.push(formatCalendario(await listEventi(), prompt));
   }
 
   return sections.join("\n\n");
@@ -194,7 +233,7 @@ async function buildAppContextForAi(prompt: string) {
       "Contesto gestionale PaintPro dell'utente. Usa questi dati solo se pertinenti alla domanda.",
       formatLogistica(logistica),
       formatPreventivi(preventivi),
-      formatCalendario(eventi),
+      formatCalendario(eventi, prompt),
     ].join("\n\n");
   } catch {
     return "";
@@ -387,8 +426,9 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
     };
   }
 
-  const appDataAnswer = !wantsImage ? await buildAppDataAnswer(lastUserMessage) : null;
   const appContext = !wantsImage ? await buildAppContextForAi(lastUserMessage) : "";
+  const preferCloudReasoning = !wantsImage && hasAiBackend && shouldPreferCloudReasoning(lastUserMessage);
+  const appDataAnswer = !wantsImage && !preferCloudReasoning ? await buildAppDataAnswer(lastUserMessage) : null;
   const localRule = buildRuleBasedAnswer(lastUserMessage, Boolean(photoDataUrl));
 
   if (appDataAnswer) {
@@ -401,7 +441,32 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
     return response;
   }
 
-  if (localRule && !wantsImage) {
+  if (preferCloudReasoning) {
+    try {
+      const data = await callHostedAi(messages, photoDataUrl, appContext);
+      const response: AssistantResponse = {
+        content: data.content || "Non ho ricevuto una risposta valida.",
+        image: data.image ?? null,
+        savedToHistory: Boolean(data.savedToHistory),
+        source: "cloud-api",
+      };
+      return response;
+    } catch (error) {
+      const fallbackDataAnswer = await buildAppDataAnswer(lastUserMessage);
+      if (fallbackDataAnswer) {
+        return {
+          content:
+            `${fallbackDataAnswer}\n\n` +
+            `Nota tecnica: il ragionamento AI cloud non e' partito (${error instanceof Error ? error.message : "errore sconosciuto"}).`,
+          image: null,
+          savedToHistory: false,
+          source: "local-rules",
+        };
+      }
+    }
+  }
+
+  if (localRule && !wantsImage && !hasAiBackend) {
     const response: AssistantResponse = {
       content: localRule,
       image: null,
