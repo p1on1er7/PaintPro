@@ -34,6 +34,10 @@ function uniqueValues(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
+function shouldFallbackImageModel(configuredModel: string, quality: string) {
+  return configuredModel.includes("mini") && quality === "low";
+}
+
 function looksLikeImageRequest(text: string) {
   return IMAGE_PATTERN.test(text);
 }
@@ -171,9 +175,11 @@ async function callOpenAiText(messages: Array<{ role: string; content: string }>
 async function callOpenAiImage(prompt: string, sourceImage: string | null) {
   const apiKey = getEnv("OPENAI_API_KEY");
   const configuredModel = getEnv("OPENAI_IMAGE_MODEL", "gpt-image-1-mini");
-  const models = uniqueValues([configuredModel, "gpt-image-1-mini", "gpt-image-1"]);
   const size = getEnv("OPENAI_IMAGE_SIZE", "1024x1024");
-  const quality = getEnv("OPENAI_IMAGE_QUALITY", "low");
+  const quality = getEnv("OPENAI_IMAGE_QUALITY", "low").trim().toLowerCase();
+  const models = shouldFallbackImageModel(configuredModel, quality)
+    ? uniqueValues([configuredModel, "gpt-image-1-mini", "gpt-image-1"])
+    : [configuredModel];
   const format = getEnv("OPENAI_IMAGE_FORMAT", "png");
   const finalPrompt = [
     "Crea un'anteprima fotorealistica per un lavoro da decoratore/imbianchino.",
@@ -188,75 +194,82 @@ async function callOpenAiImage(prompt: string, sourceImage: string | null) {
   let lastError = "";
 
   for (const model of models) {
-    if (!sourceImage) {
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        prompt: finalPrompt,
-        size,
-        quality,
-        output_format: format,
-      }),
-    });
+    try {
+      if (!sourceImage) {
+        const response = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            prompt: finalPrompt,
+            size,
+            quality,
+            output_format: format,
+          }),
+        });
 
-    if (!response.ok) {
-      lastError = `${model}: ${await parseOpenAiError(response)}`;
-      continue;
+        if (!response.ok) {
+          lastError = `${model}: ${await parseOpenAiError(response)}`;
+          continue;
+        }
+
+        const data = await response.json();
+        const base64 = data.data?.[0]?.b64_json;
+        const url = data.data?.[0]?.url;
+        if (!base64 && !url) {
+          lastError = `${model}: nessuna immagine generata`;
+          continue;
+        }
+
+        return { url: base64 ? `data:image/${format};base64,${base64}` : url };
+      }
+
+      const file = await dataUrlToFile(sourceImage, "source-image.jpg");
+      const formData = new FormData();
+      formData.append("model", model);
+      formData.append("prompt", finalPrompt);
+      formData.append("size", size);
+      formData.append("quality", quality);
+      formData.append("output_format", format);
+      formData.append("image", file);
+
+      const response = await fetch("https://api.openai.com/v1/images/edits", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        lastError = `${model}: ${await parseOpenAiError(response)}`;
+        continue;
+      }
+
+      const data = await response.json();
+      const base64 = data.data?.[0]?.b64_json;
+      const url = data.data?.[0]?.url;
+      if (!base64 && !url) {
+        lastError = `${model}: nessuna immagine generata`;
+        continue;
+      }
+
+      return { url: base64 ? `data:image/${format};base64,${base64}` : url };
+    } catch (error) {
+      lastError =
+        error instanceof Error
+          ? `${model}: ${error.message}`
+          : `${model}: errore durante la generazione immagine`;
     }
-
-    const data = await response.json();
-    const base64 = data.data?.[0]?.b64_json;
-    const url = data.data?.[0]?.url;
-    if (!base64 && !url) {
-      lastError = `${model}: nessuna immagine generata`;
-      continue;
-    }
-
-    return { url: base64 ? `data:image/${format};base64,${base64}` : url };
-    }
-
-    const file = await dataUrlToFile(sourceImage, "source-image.jpg");
-    const formData = new FormData();
-    formData.append("model", model);
-    formData.append("prompt", finalPrompt);
-    formData.append("size", size);
-    formData.append("quality", quality);
-    formData.append("output_format", format);
-    formData.append("image", file);
-
-    const response = await fetch("https://api.openai.com/v1/images/edits", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      lastError = `${model}: ${await parseOpenAiError(response)}`;
-      continue;
-    }
-
-    const data = await response.json();
-    const base64 = data.data?.[0]?.b64_json;
-    const url = data.data?.[0]?.url;
-    if (!base64 && !url) {
-      lastError = `${model}: nessuna immagine generata`;
-      continue;
-    }
-
-    return { url: base64 ? `data:image/${format};base64,${base64}` : url };
   }
 
   return {
     error:
       `${lastError || "Nessun modello immagine disponibile."} ` +
-      "Se il messaggio parla di organization verification, completa la verifica dell'organizzazione OpenAI o usa un modello immagini abilitato sul tuo account.",
+      "Se usi gpt-image-1 con qualita' medium/high e ricevi 504, la generazione sta superando il tempo massimo della funzione Vercel: prova gpt-image-1-mini medium oppure gpt-image-1 low.",
     status: 500,
   };
 }
