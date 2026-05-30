@@ -17,9 +17,17 @@ Privilegia consigli operativi, materiali, colori, cicli applicativi, stime rapid
 Se l'utente chiede un'anteprima immagine, non spiegare troppo: genera o modifica l'immagine e conferma brevemente.`;
 
 const IMAGE_PATTERN = /(genera|simula|mostra|anteprima|render|fammi vedere|preview)/i;
+const WEB_SEARCH_PATTERN =
+  /(internet|online|cerca|aggiornat|scheda tecnica|normativa|metodo|metodologia|ciclo applicativo|supporto|fondo|primer|fissativo|muffa|umidita|facciata|esterno|resina|microcemento|spatolato|velatura|cebos|sikkens|boero|kerakoll|mapei|oikos|san marco|caparol)/i;
 
 function getEnv(name: string, fallback = "") {
   return typeof process !== "undefined" ? process.env[name] ?? fallback : fallback;
+}
+
+function getEnvBool(name: string, fallback = false) {
+  const value = getEnv(name);
+  if (!value) return fallback;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 function uniqueValues(values: string[]) {
@@ -30,9 +38,18 @@ function looksLikeImageRequest(text: string) {
   return IMAGE_PATTERN.test(text);
 }
 
+function shouldUseWebSearch(messages: Array<{ role: string; content: string }>, appContext: string) {
+  if (!getEnvBool("OPENAI_ENABLE_WEB_SEARCH", true)) return false;
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+  return WEB_SEARCH_PATTERN.test(lastUserMessage) || WEB_SEARCH_PATTERN.test(appContext);
+}
+
 function buildInstructions(appContext: string) {
   const context = typeof appContext === "string" && appContext.trim() ? `\n\n${appContext.trim()}` : "";
-  return `${SYSTEM_PROMPT}${context}`;
+  return `${SYSTEM_PROMPT}
+Quando dai consigli tecnici, ragiona come un capocantiere esperto: prima verifica supporto e condizioni, poi proponi ciclo, materiali, tempi e rischi.
+Se hai accesso alla ricerca web e la domanda riguarda metodi, prodotti, schede tecniche o informazioni aggiornabili, usa fonti aggiornate e segnala quando stai facendo una stima pratica.
+Non inventare dati di schede tecniche: se non sei sicuro, dillo e suggerisci una verifica sul prodotto specifico.${context}`;
 }
 
 function extractTextContent(input: unknown) {
@@ -72,26 +89,59 @@ async function parseOpenAiError(response: Response) {
 async function callOpenAiText(messages: Array<{ role: string; content: string }>, appContext: string) {
   const apiKey = getEnv("OPENAI_API_KEY");
   const model = getEnv("OPENAI_TEXT_MODEL", "gpt-5-nano");
+  const useWebSearch = shouldUseWebSearch(messages, appContext);
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const buildBody = (withWebSearch: boolean) => ({
+    model,
+    instructions: buildInstructions(appContext),
+    input: messages.map((message) => ({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: message.content,
+    })),
+    max_output_tokens: 900,
+    ...(withWebSearch
+      ? {
+          tools: [
+            {
+              type: "web_search",
+              user_location: {
+                type: "approximate",
+                country: "IT",
+                timezone: "Europe/Rome",
+              },
+            },
+          ],
+        }
+      : {}),
+  });
+
+  let response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      instructions: buildInstructions(appContext),
-      input: messages.map((message) => ({
-        role: message.role === "assistant" ? "assistant" : "user",
-        content: message.content,
-      })),
-      max_output_tokens: 700,
-    }),
+    body: JSON.stringify(buildBody(useWebSearch)),
   });
 
   if (!response.ok) {
-    return { error: await response.text(), status: response.status };
+    const firstError = await parseOpenAiError(response);
+    if (useWebSearch) {
+      response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(buildBody(false)),
+      });
+
+      if (!response.ok) {
+        return { error: `${firstError}\nFallback senza ricerca web: ${await parseOpenAiError(response)}`, status: response.status };
+      }
+    } else {
+      return { error: firstError, status: response.status };
+    }
   }
 
   const data = await response.json();
@@ -200,6 +250,7 @@ export default async function handler(request: Request) {
       imageSize: getEnv("OPENAI_IMAGE_SIZE", "1024x1024"),
       imageQuality: getEnv("OPENAI_IMAGE_QUALITY", "low"),
       imageFormat: getEnv("OPENAI_IMAGE_FORMAT", "png"),
+      webSearchEnabled: getEnvBool("OPENAI_ENABLE_WEB_SEARCH", true),
     });
   }
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);

@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import { Camera, Sparkles, Send, Loader2, Image as ImageIcon, Trash2, ChevronDown, ChevronUp, X } from "lucide-react";
@@ -22,21 +23,94 @@ type Msg = {
   image?: AssistantImage | null;
 };
 
+type ScannerSessionState = {
+  photoName: string | null;
+  photoUrl: string | null;
+  messages: Msg[];
+};
+
+const SCANNER_SESSION_KEY = "paintpro.scanner-session.v1";
+
+const INITIAL_MESSAGES: Msg[] = [
+  {
+    role: "assistant",
+    content:
+      "Ciao! Sono il tuo **assistente decoratore**. Posso leggere logistica, preventivi e calendario, aiutarti sui cicli applicativi e generare anteprime immagine quando il backend AI e' attivo.",
+  },
+];
+
+const IMAGE_PROMPT_TEMPLATES = [
+  {
+    id: "pareti-interne",
+    label: "Pareti interne",
+    prompt:
+      "Voglio generare un'immagine modificando solo le pareti interne della foto. Mantieni invariati pavimento, soffitto, mobili, infissi, porte, finestre, illuminazione, prospettiva e tutti gli oggetti presenti. Applica alle pareti il colore RAL/NCS ... . Per bordi porte/finestre usa ... . Risultato realistico da decoratore professionista, senza aggiungere scritte o oggetti.",
+  },
+  {
+    id: "pareti-esterne",
+    label: "Pareti esterne",
+    prompt:
+      "Voglio generare un'immagine modificando solo le pareti esterne/facciata della foto. Mantieni invariati tetto, serramenti, persiane, pavimentazione, vegetazione, ombre, prospettiva e tutti gli elementi non murari. Applica alla facciata il colore RAL/NCS ... . Per bordi finestre/porte, cornici o zoccolatura usa ... . Risultato realistico, pulito e coerente con la luce originale.",
+  },
+  {
+    id: "abbinamento-colori",
+    label: "Abbinamento colori",
+    prompt:
+      "Genera un'anteprima realistica proponendo un abbinamento colori professionale per la superficie in foto. Modifica solo le pareti interessate, conserva tutto il resto invariato e indicami nella risposta i RAL/NCS consigliati per parete principale, eventuali bordi porte/finestre e dettagli.",
+  },
+];
+
+function readScannerSession(): ScannerSessionState | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(SCANNER_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ScannerSessionState>;
+
+    return {
+      photoName: parsed.photoName ?? null,
+      photoUrl: parsed.photoUrl ?? null,
+      messages: Array.isArray(parsed.messages) && parsed.messages.length > 0 ? parsed.messages : INITIAL_MESSAGES,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeScannerSession(state: ScannerSessionState) {
+  if (typeof window === "undefined") return;
+
+  const nextState = {
+    ...state,
+    messages: state.messages.slice(-30),
+  };
+
+  try {
+    window.sessionStorage.setItem(SCANNER_SESSION_KEY, JSON.stringify(nextState));
+  } catch {
+    const withoutEmbeddedImages = {
+      ...nextState,
+      messages: nextState.messages.map((message) => ({ ...message, image: null })),
+    };
+    try {
+      window.sessionStorage.setItem(SCANNER_SESSION_KEY, JSON.stringify(withoutEmbeddedImages));
+    } catch {
+      // Session storage can be unavailable or full on some mobile browsers.
+    }
+  }
+}
+
 export default function Scanner() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBoxRef = useRef<HTMLDivElement>(null);
+  const [initialSession] = useState(readScannerSession);
 
-  const [photoName, setPhotoName] = useState<string | null>(null);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoName, setPhotoName] = useState<string | null>(initialSession?.photoName ?? null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(initialSession?.photoUrl ?? null);
   const [uploading, setUploading] = useState(false);
 
-  const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: "assistant",
-      content:
-        "Ciao! Sono il tuo **assistente decoratore**. Lavoro in modalita' **locale-first**: prima uso cache e logica locale, poi eventualmente provider AI esterni solo quando servono davvero.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Msg[]>(initialSession?.messages ?? INITIAL_MESSAGES);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
 
@@ -50,6 +124,10 @@ export default function Scanner() {
   useEffect(() => {
     loadHistory();
   }, []);
+
+  useEffect(() => {
+    writeScannerSession({ photoName, photoUrl, messages });
+  }, [photoName, photoUrl, messages]);
 
   async function loadHistory() {
     try {
@@ -80,6 +158,13 @@ export default function Scanner() {
     setPhotoName(null);
     setPhotoUrl(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function applyImageTemplate(templateId: string) {
+    const template = IMAGE_PROMPT_TEMPLATES.find((item) => item.id === templateId);
+    if (!template) return;
+    setChatInput(template.prompt);
+    toast.success("Template immagine inserito");
   }
 
   async function sendChat() {
@@ -236,6 +321,21 @@ export default function Scanner() {
           <span className="text-[10px] text-muted-foreground ml-auto">
             dati {appConfig.appMode} • AI {appConfig.aiMode} • backend {hasAiBackend ? "ok" : "mancante"}
           </span>
+        </div>
+
+        <div className="mb-3">
+          <Select onValueChange={applyImageTemplate}>
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="Template prompt immagine" />
+            </SelectTrigger>
+            <SelectContent>
+              {IMAGE_PROMPT_TEMPLATES.map((template) => (
+                <SelectItem key={template.id} value={template.id}>
+                  {template.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div ref={chatBoxRef} className="h-[360px] overflow-y-auto scrollbar-thin space-y-3 pr-1 mb-3">
