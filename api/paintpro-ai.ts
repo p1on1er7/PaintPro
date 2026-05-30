@@ -68,6 +68,25 @@ function extractTextContent(input: unknown) {
   return "";
 }
 
+function extractResponseText(data: any) {
+  const directText = extractTextContent(data?.output_text);
+  if (directText) return directText;
+
+  const output = Array.isArray(data?.output) ? data.output : [];
+  const parts: string[] = [];
+
+  for (const item of output) {
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const contentItem of content) {
+      if (typeof contentItem?.text === "string") parts.push(contentItem.text);
+      if (typeof contentItem?.output_text === "string") parts.push(contentItem.output_text);
+      if (typeof contentItem?.content === "string") parts.push(contentItem.content);
+    }
+  }
+
+  return parts.join("\n").trim();
+}
+
 async function dataUrlToFile(dataUrl: string, fileName: string) {
   const response = await fetch(dataUrl);
   const blob = await response.blob();
@@ -145,7 +164,7 @@ async function callOpenAiText(messages: Array<{ role: string; content: string }>
   }
 
   const data = await response.json();
-  const content = extractTextContent(data.output_text) || "Non ho ricevuto una risposta valida.";
+  const content = extractResponseText(data) || "Non ho ricevuto una risposta valida.";
   return { content };
 }
 
@@ -157,8 +176,11 @@ async function callOpenAiImage(prompt: string, sourceImage: string | null) {
   const quality = getEnv("OPENAI_IMAGE_QUALITY", "low");
   const format = getEnv("OPENAI_IMAGE_FORMAT", "png");
   const finalPrompt = [
-    "Crea un'anteprima realistica per un lavoro da decoratore/imbianchino.",
-    "Mantieni proporzioni credibili, luce naturale, pareti e superfici realistiche.",
+    "Crea un'anteprima fotorealistica per un lavoro da decoratore/imbianchino.",
+    "Se ricevi una foto sorgente, trattala come vincolo forte: conserva composizione, prospettiva, geometria, luce, ombre, materiali non richiesti e tutti gli oggetti presenti.",
+    "Modifica esclusivamente le superfici richieste dall'utente, soprattutto pareti, facciate, bordi o cornici indicati.",
+    "Non cambiare pavimenti, serramenti, mobili, tetto, vegetazione, persone, impianti, texture non richieste o proporzioni architettoniche.",
+    "Il risultato deve sembrare una simulazione colore professionale sulla foto originale, non un nuovo ambiente inventato.",
     "Non aggiungere testo, loghi o scritte nell'immagine.",
     prompt,
   ].join("\n");
