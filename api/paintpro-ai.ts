@@ -1,15 +1,8 @@
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-    },
-  });
-
-export const config = {
-  runtime: "edge",
-};
+function sendJson(res: any, body: unknown, status = 200) {
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(status).json(body);
+}
 
 const SYSTEM_PROMPT = `Sei PaintPro AI, assistente di un decoratore italiano.
 Rispondi sempre in italiano, in modo conciso, pratico e professionale.
@@ -92,9 +85,16 @@ function extractResponseText(data: any) {
 }
 
 async function dataUrlToFile(dataUrl: string, fileName: string) {
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
-  return new File([blob], fileName, { type: blob.type || "image/jpeg" });
+  const match = dataUrl.match(/^data:(.*?);base64,(.*)$/);
+  if (!match) {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    return new File([blob], fileName, { type: blob.type || "image/jpeg" });
+  }
+
+  const [, mimeType, base64] = match;
+  const bytes = Buffer.from(base64, "base64");
+  return new File([bytes], fileName, { type: mimeType || "image/jpeg" });
 }
 
 async function parseOpenAiError(response: Response) {
@@ -274,10 +274,10 @@ async function callOpenAiImage(prompt: string, sourceImage: string | null) {
   };
 }
 
-export default async function handler(request: Request) {
-  if (request.method === "OPTIONS") return new Response(null, { status: 204 });
-  if (request.method === "GET") {
-    return json({
+export default async function handler(req: any, res: any) {
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method === "GET") {
+    return sendJson(res, {
       ok: true,
       openaiKeyConfigured: Boolean(getEnv("OPENAI_API_KEY")),
       textModel: getEnv("OPENAI_TEXT_MODEL", "gpt-5-nano"),
@@ -286,16 +286,18 @@ export default async function handler(request: Request) {
       imageQuality: getEnv("OPENAI_IMAGE_QUALITY", "low"),
       imageFormat: getEnv("OPENAI_IMAGE_FORMAT", "png"),
       webSearchEnabled: getEnvBool("OPENAI_ENABLE_WEB_SEARCH", true),
+      runtime: "node",
     });
   }
-  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (req.method !== "POST") return sendJson(res, { error: "Method not allowed" }, 405);
 
   if (!getEnv("OPENAI_API_KEY")) {
-    return json({ error: "OPENAI_API_KEY non configurata" }, 500);
+    return sendJson(res, { error: "OPENAI_API_KEY non configurata" }, 500);
   }
 
   try {
-    const { messages = [], sourceImage = null, appContext = "" } = await request.json();
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body ?? {};
+    const { messages = [], sourceImage = null, appContext = "" } = body;
     const safeMessages = Array.isArray(messages)
       ? messages
           .filter((message) => message && typeof message.content === "string" && typeof message.role === "string")
@@ -305,16 +307,16 @@ export default async function handler(request: Request) {
 
     const lastUserMessage = [...safeMessages].reverse().find((message) => message.role === "user")?.content ?? "";
     if (!lastUserMessage.trim()) {
-      return json({ error: "Messaggio mancante" }, 400);
+      return sendJson(res, { error: "Messaggio mancante" }, 400);
     }
 
     if (looksLikeImageRequest(lastUserMessage)) {
       const imageResult = await callOpenAiImage(lastUserMessage, sourceImage);
       if ("error" in imageResult) {
-        return json({ error: imageResult.error }, imageResult.status || 500);
+        return sendJson(res, { error: imageResult.error }, imageResult.status || 500);
       }
 
-      return json({
+      return sendJson(res, {
         content: "Ecco l'anteprima.",
         image: {
           url: imageResult.url,
@@ -328,16 +330,17 @@ export default async function handler(request: Request) {
 
     const textResult = await callOpenAiText(safeMessages, String(appContext || ""));
     if ("error" in textResult) {
-      return json({ error: textResult.error }, textResult.status || 500);
+      return sendJson(res, { error: textResult.error }, textResult.status || 500);
     }
 
-    return json({
+    return sendJson(res, {
       content: textResult.content,
       image: null,
       savedToHistory: false,
     });
   } catch (error) {
-    return json(
+    return sendJson(
+      res,
       { error: error instanceof Error ? error.message : "Errore interno" },
       500,
     );

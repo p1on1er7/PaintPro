@@ -324,7 +324,7 @@ async function fileToDataUrl(file: Blob) {
   });
 }
 
-export async function compressImageForAi(file: File, maxSide = 1400, quality = 0.82) {
+export async function compressImageForAi(file: File, maxSide = 1152, quality = 0.76) {
   const bitmap = await createImageBitmap(file);
   const ratio = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const width = Math.max(1, Math.round(bitmap.width * ratio));
