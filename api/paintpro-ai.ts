@@ -23,6 +23,11 @@ function getEnvBool(name: string, fallback = false) {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
+function getEnvNumber(name: string, fallback: number) {
+  const value = Number(getEnv(name));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 function uniqueValues(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -73,15 +78,33 @@ function extractResponseText(data: any) {
   const parts: string[] = [];
 
   for (const item of output) {
+    const itemText = extractTextContent(item?.text ?? item?.output_text ?? item?.content);
+    if (itemText) parts.push(itemText);
+
     const content = Array.isArray(item?.content) ? item.content : [];
     for (const contentItem of content) {
       if (typeof contentItem?.text === "string") parts.push(contentItem.text);
       if (typeof contentItem?.output_text === "string") parts.push(contentItem.output_text);
       if (typeof contentItem?.content === "string") parts.push(contentItem.content);
+      if (typeof contentItem?.refusal === "string") parts.push(contentItem.refusal);
     }
   }
 
   return parts.join("\n").trim();
+}
+
+function isReasoningModel(model: string) {
+  return /^(gpt-5|o\d|o\d-)/i.test(model);
+}
+
+function buildEmptyTextError(data: any) {
+  const status = data?.status ? `status ${data.status}` : "risposta senza testo";
+  const reason = data?.incomplete_details?.reason ? `, motivo ${data.incomplete_details.reason}` : "";
+  const usage = data?.usage?.output_tokens
+    ? `, output token ${data.usage.output_tokens}${data.usage?.output_tokens_details?.reasoning_tokens ? ` di cui ${data.usage.output_tokens_details.reasoning_tokens} di ragionamento` : ""}`
+    : "";
+
+  return `OpenAI ha risposto ma non ha prodotto testo visibile (${status}${reason}${usage}).`;
 }
 
 async function dataUrlToFile(dataUrl: string, fileName: string) {
@@ -111,7 +134,9 @@ async function parseOpenAiError(response: Response) {
 
 async function callOpenAiText(messages: Array<{ role: string; content: string }>, appContext: string) {
   const apiKey = getEnv("OPENAI_API_KEY");
-  const model = getEnv("OPENAI_TEXT_MODEL", "gpt-5-nano");
+  const model = getEnv("OPENAI_TEXT_MODEL", "gpt-5-mini");
+  const maxOutputTokens = getEnvNumber("OPENAI_TEXT_MAX_OUTPUT_TOKENS", 2200);
+  const reasoningEffort = getEnv("OPENAI_TEXT_REASONING_EFFORT", "minimal");
   const useWebSearch = shouldUseWebSearch(messages, appContext);
 
   const buildBody = (withWebSearch: boolean) => ({
@@ -121,9 +146,11 @@ async function callOpenAiText(messages: Array<{ role: string; content: string }>
       role: message.role === "assistant" ? "assistant" : "user",
       content: message.content,
     })),
-    max_output_tokens: 900,
+    max_output_tokens: maxOutputTokens,
+    ...(isReasoningModel(model) ? { reasoning: { effort: reasoningEffort } } : {}),
     ...(withWebSearch
       ? {
+          max_tool_calls: 2,
           tools: [
             {
               type: "web_search",
@@ -168,7 +195,33 @@ async function callOpenAiText(messages: Array<{ role: string; content: string }>
   }
 
   const data = await response.json();
-  const content = extractResponseText(data) || "Non ho ricevuto una risposta valida.";
+  let content = extractResponseText(data);
+
+  if (!content && useWebSearch) {
+    response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(buildBody(false)),
+    });
+
+    if (!response.ok) {
+      return { error: `${buildEmptyTextError(data)}\nFallback senza ricerca web: ${await parseOpenAiError(response)}`, status: response.status };
+    }
+
+    const fallbackData = await response.json();
+    content = extractResponseText(fallbackData);
+    if (!content) {
+      return { error: `${buildEmptyTextError(data)}\nFallback senza ricerca web: ${buildEmptyTextError(fallbackData)}`, status: 502 };
+    }
+  }
+
+  if (!content) {
+    return { error: buildEmptyTextError(data), status: 502 };
+  }
+
   return { content };
 }
 
@@ -280,7 +333,9 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, {
       ok: true,
       openaiKeyConfigured: Boolean(getEnv("OPENAI_API_KEY")),
-      textModel: getEnv("OPENAI_TEXT_MODEL", "gpt-5-nano"),
+      textModel: getEnv("OPENAI_TEXT_MODEL", "gpt-5-mini"),
+      textMaxOutputTokens: getEnvNumber("OPENAI_TEXT_MAX_OUTPUT_TOKENS", 2200),
+      textReasoningEffort: getEnv("OPENAI_TEXT_REASONING_EFFORT", "minimal"),
       imageModel: getEnv("OPENAI_IMAGE_MODEL", "gpt-image-1-mini"),
       imageSize: getEnv("OPENAI_IMAGE_SIZE", "1024x1024"),
       imageQuality: getEnv("OPENAI_IMAGE_QUALITY", "low"),
