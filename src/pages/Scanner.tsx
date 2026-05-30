@@ -12,10 +12,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
-import { Camera, Sparkles, Send, Loader2, Image as ImageIcon, Trash2, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Camera, Sparkles, Send, Loader2, Image as ImageIcon, Trash2, ChevronDown, ChevronUp, X, Wand2, Lightbulb } from "lucide-react";
 
 type Msg = {
   role: "user" | "assistant";
@@ -39,24 +38,20 @@ const INITIAL_MESSAGES: Msg[] = [
   },
 ];
 
-const IMAGE_PROMPT_TEMPLATES = [
+const PROMPT_HELPERS = [
   {
-    id: "pareti-interne",
-    label: "Pareti interne",
+    id: "image",
+    label: "Genera immagine",
+    icon: Wand2,
     prompt:
-      "Voglio generare un'immagine modificando solo le pareti interne della foto. Mantieni invariati pavimento, soffitto, mobili, infissi, porte, finestre, illuminazione, prospettiva e tutti gli oggetti presenti. Applica alle pareti il colore RAL/NCS ... . Per bordi porte/finestre usa ... . Risultato realistico da decoratore professionista, senza aggiungere scritte o oggetti.",
+      "Voglio generare un'immagine partendo dalla foto caricata. Modifica solo le pareti interne/esterne interessate senza toccare nient'altro: mantieni invariati pavimento, soffitto, mobili, infissi, porte, finestre, tetto, vegetazione, ombre, luce e prospettiva. Applica il colore RAL/NCS ... sulle pareti e il colore ... sui bordi di finestre/porte/cornici. Risultato realistico da decoratore professionista, senza aggiungere scritte, loghi o oggetti.",
   },
   {
-    id: "pareti-esterne",
-    label: "Pareti esterne",
+    id: "advice",
+    label: "Consiglio",
+    icon: Lightbulb,
     prompt:
-      "Voglio generare un'immagine modificando solo le pareti esterne/facciata della foto. Mantieni invariati tetto, serramenti, persiane, pavimentazione, vegetazione, ombre, prospettiva e tutti gli elementi non murari. Applica alla facciata il colore RAL/NCS ... . Per bordi finestre/porte, cornici o zoccolatura usa ... . Risultato realistico, pulito e coerente con la luce originale.",
-  },
-  {
-    id: "abbinamento-colori",
-    label: "Abbinamento colori",
-    prompt:
-      "Genera un'anteprima realistica proponendo un abbinamento colori professionale per la superficie in foto. Modifica solo le pareti interessate, conserva tutto il resto invariato e indicami nella risposta i RAL/NCS consigliati per parete principale, eventuali bordi porte/finestre e dettagli.",
+      "Ho bisogno di un consiglio tecnico da decoratore. Analizza questa situazione: ... . Dimmi il ciclo di lavoro consigliato, preparazione del fondo, materiali/prodotti da usare, numero di mani, tempi indicativi, errori da evitare e se devo comprare qualcosa che non risulta nella mia logistica.",
   },
 ];
 
@@ -160,11 +155,11 @@ export default function Scanner() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  function applyImageTemplate(templateId: string) {
-    const template = IMAGE_PROMPT_TEMPLATES.find((item) => item.id === templateId);
-    if (!template) return;
-    setChatInput(template.prompt);
-    toast.success("Template immagine inserito");
+  function applyPromptHelper(helperId: string) {
+    const helper = PROMPT_HELPERS.find((item) => item.id === helperId);
+    if (!helper) return;
+    setChatInput(helper.prompt);
+    toast.success(`${helper.label} pronto da completare`);
   }
 
   async function sendChat() {
@@ -323,19 +318,20 @@ export default function Scanner() {
           </span>
         </div>
 
-        <div className="mb-3">
-          <Select onValueChange={applyImageTemplate}>
-            <SelectTrigger className="h-9 text-xs">
-              <SelectValue placeholder="Template prompt immagine" />
-            </SelectTrigger>
-            <SelectContent>
-              {IMAGE_PROMPT_TEMPLATES.map((template) => (
-                <SelectItem key={template.id} value={template.id}>
-                  {template.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {PROMPT_HELPERS.map(({ id, label, icon: Icon }) => (
+            <Button
+              key={id}
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => applyPromptHelper(id)}
+              className="h-9 justify-start gap-2 text-xs"
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </Button>
+          ))}
         </div>
 
         <div ref={chatBoxRef} className="h-[360px] overflow-y-auto scrollbar-thin space-y-3 pr-1 mb-3">
