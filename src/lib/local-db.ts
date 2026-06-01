@@ -127,3 +127,11 @@ export function deleteLocalRow(table: string, id: string) {
   state.tables[table] = (state.tables[table] ?? []).filter((item) => item.id !== id);
   writeState(state);
 }
+
+export function clearLocalTable(table: string) {
+  const state = readState();
+  if (!state.tables[table]?.length) return;
+
+  state.tables[table] = [];
+  writeState(state);
+}

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { appConfig, hasAiBackend } from "@/lib/app-config";
 import {
   deleteGeneratedImage,
+  cleanupGeneratedImagesCache,
   listGeneratedImages,
   saveGeneratedImage,
   type GeneratedImageRecord,
 } from "@/lib/app-data";
-import { compressImageForAi, sendPaintProChat, type AssistantImage } from "@/lib/paintpro-ai";
+import { cleanupPaintProAiCache, compressImageForAi, sendPaintProChat, type AssistantImage } from "@/lib/paintpro-ai";
 import AppLayout from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ type ScannerSessionState = {
 };
 
 const SCANNER_SESSION_KEY = "paintpro.scanner-session.v1";
+const MAX_SESSION_MESSAGES = 20;
 
 const INITIAL_MESSAGES: Msg[] = [
   {
@@ -55,6 +57,14 @@ const PROMPT_HELPERS = [
   },
 ];
 
+function sanitizeSessionMessages(messages: Msg[]) {
+  return messages.slice(-MAX_SESSION_MESSAGES).map((message) => ({
+    role: message.role,
+    content: message.content,
+    image: null,
+  }));
+}
+
 function readScannerSession(): ScannerSessionState | null {
   if (typeof window === "undefined") return null;
 
@@ -66,7 +76,10 @@ function readScannerSession(): ScannerSessionState | null {
     return {
       photoName: parsed.photoName ?? null,
       photoUrl: parsed.photoUrl ?? null,
-      messages: Array.isArray(parsed.messages) && parsed.messages.length > 0 ? parsed.messages : INITIAL_MESSAGES,
+      messages:
+        Array.isArray(parsed.messages) && parsed.messages.length > 0
+          ? sanitizeSessionMessages(parsed.messages as Msg[])
+          : INITIAL_MESSAGES,
     };
   } catch {
     return null;
@@ -78,20 +91,21 @@ function writeScannerSession(state: ScannerSessionState) {
 
   const nextState = {
     ...state,
-    messages: state.messages.slice(-30),
+    messages: sanitizeSessionMessages(state.messages),
   };
 
   try {
     window.sessionStorage.setItem(SCANNER_SESSION_KEY, JSON.stringify(nextState));
   } catch {
-    const withoutEmbeddedImages = {
+    const withoutPhoto = {
       ...nextState,
-      messages: nextState.messages.map((message) => ({ ...message, image: null })),
+      photoName: null,
+      photoUrl: null,
     };
     try {
-      window.sessionStorage.setItem(SCANNER_SESSION_KEY, JSON.stringify(withoutEmbeddedImages));
+      window.sessionStorage.setItem(SCANNER_SESSION_KEY, JSON.stringify(withoutPhoto));
     } catch {
-      // Session storage can be unavailable or full on some mobile browsers.
+      window.sessionStorage.removeItem(SCANNER_SESSION_KEY);
     }
   }
 }
@@ -117,6 +131,8 @@ export default function Scanner() {
   }, [messages]);
 
   useEffect(() => {
+    cleanupPaintProAiCache();
+    cleanupGeneratedImagesCache();
     loadHistory();
   }, []);
 

@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { appConfig, isLocalDataMode } from "@/lib/app-config";
-import { deleteLocalRow, ensureLocalUser, readLocalTable, saveLocalRow } from "@/lib/local-db";
+import { clearLocalTable, deleteLocalRow, ensureLocalUser, readLocalTable, saveLocalRow } from "@/lib/local-db";
 
 export type AuthUser = {
   id: string;
@@ -258,8 +258,19 @@ export async function listGeneratedImages() {
 
 export async function saveGeneratedImage(payload: Omit<GeneratedImageRecord, "id" | "user_id" | "created_at" | "updated_at">) {
   const user = await requireCurrentUser();
+  const now = new Date().toISOString();
 
-  if (isLocalDataMode || !appConfig.persistRemoteGeneratedImages) {
+  if (!isLocalDataMode && !appConfig.persistRemoteGeneratedImages) {
+    return {
+      ...payload,
+      id: `unsaved-${Date.now()}`,
+      user_id: user.id,
+      created_at: now,
+      updated_at: now,
+    } as GeneratedImageRecord;
+  }
+
+  if (isLocalDataMode) {
     const existing = readLocalTable<GeneratedImageRecord>("generated_images").find(
       (item) => item.user_id === user.id && item.result_url === payload.result_url && item.prompt === payload.prompt,
     );
@@ -290,4 +301,10 @@ export async function deleteGeneratedImage(id: string) {
 
   const { error } = await supabase.from("generated_images").delete().eq("id", id);
   if (error) throw error;
+}
+
+export function cleanupGeneratedImagesCache() {
+  if (!isLocalDataMode && !appConfig.persistRemoteGeneratedImages) {
+    clearLocalTable("generated_images");
+  }
 }

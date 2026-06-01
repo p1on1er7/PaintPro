@@ -34,6 +34,7 @@ type CachedResponse = AssistantResponse & {
 };
 
 const CACHE_KEY = "paintpro.ai-cache.v2";
+const LEGACY_CACHE_KEYS = ["paintpro.ai-cache.v1", "paintpro.ai-cache.v2"];
 const MAX_CACHE_ITEMS = 40;
 const MAX_REMOTE_MESSAGES = 8;
 const MAX_CONTEXT_ITEMS = 30;
@@ -68,7 +69,21 @@ function readCache(): CachedResponse[] {
 
 function writeCache(entries: CachedResponse[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(CACHE_KEY, JSON.stringify(entries.slice(0, MAX_CACHE_ITEMS)));
+
+  const lightEntries = entries
+    .filter((entry) => !entry.image?.url?.startsWith("data:"))
+    .map((entry) => ({ ...entry, image: null }))
+    .slice(0, MAX_CACHE_ITEMS);
+
+  try {
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(lightEntries));
+  } catch {
+    try {
+      window.localStorage.setItem(CACHE_KEY, JSON.stringify(lightEntries.slice(0, 10)));
+    } catch {
+      window.localStorage.removeItem(CACHE_KEY);
+    }
+  }
 }
 
 function buildCacheKey(messages: AssistantMessage[], photoDataUrl: string | null) {
@@ -78,6 +93,8 @@ function buildCacheKey(messages: AssistantMessage[], photoDataUrl: string | null
 }
 
 function saveCachedResponse(key: string, response: AssistantResponse) {
+  if (response.image) return;
+
   const nextEntry: CachedResponse = { ...response, key, createdAt: new Date().toISOString() };
   const cache = readCache().filter((item) => item.key !== key);
   writeCache([nextEntry, ...cache]);
@@ -85,6 +102,36 @@ function saveCachedResponse(key: string, response: AssistantResponse) {
 
 function findCachedResponse(key: string) {
   return readCache().find((item) => item.key === key) ?? null;
+}
+
+export function cleanupPaintProAiCache() {
+  if (typeof window === "undefined") return;
+
+  for (const key of LEGACY_CACHE_KEYS) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+
+      const parsed = JSON.parse(raw) as CachedResponse[];
+      if (!Array.isArray(parsed)) {
+        window.localStorage.removeItem(key);
+        continue;
+      }
+
+      const lightEntries = parsed
+        .filter((entry) => !entry?.image?.url?.startsWith("data:"))
+        .map((entry) => ({ ...entry, image: null }))
+        .slice(0, 10);
+
+      if (key === CACHE_KEY && lightEntries.length) {
+        window.localStorage.setItem(key, JSON.stringify(lightEntries));
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      window.localStorage.removeItem(key);
+    }
+  }
 }
 
 function isAppDataQuestion(text: string) {
