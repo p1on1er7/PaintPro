@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { isPrivateAccount } from "../_shared/private-account.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,6 +13,7 @@ serve(async (req) => {
   try {
     const authHeader = req.headers.get("Authorization");
     let userId: string | null = null;
+    let userEmail: string | undefined;
 
     if (authHeader) {
       try {
@@ -23,9 +25,24 @@ serve(async (req) => {
 
         const { data: { user } } = await supabase.auth.getUser();
         userId = user?.id ?? null;
+        userEmail = user?.email;
       } catch {
         userId = null;
       }
+    }
+
+    if (!userId) {
+      return new Response(JSON.stringify({ error: "Accesso richiesto" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!(await isPrivateAccount(userEmail))) {
+      return new Response(JSON.stringify({ error: "Account non autorizzato" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const { sourceImage, prompt, colorCode, zone, quality, storeResult = true } = await req.json();

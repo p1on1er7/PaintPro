@@ -12,10 +12,8 @@ import { Loader2, Paintbrush } from "lucide-react";
 
 export default function Auth() {
   const { user, loading } = useAuth();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const [checkingSupabase, setCheckingSupabase] = useState(false);
@@ -37,24 +35,11 @@ export default function Auth() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/`,
-            data: { display_name: displayName || email.split("@")[0] },
-          },
-        });
-        if (error) throw error;
-        toast.success("Account creato! Sei dentro.");
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        toast.success("Bentornato!");
-      }
-    } catch (err: any) {
-      const message = err?.message ?? "Errore";
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      toast.success("Bentornato!");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Errore";
       toast.error(message);
       setDiagnostic(message);
     } finally {
@@ -84,39 +69,11 @@ export default function Auth() {
             <Paintbrush className="h-8 w-8 text-accent" />
           </div>
           <h1 className="text-3xl font-display font-semibold">PaintPro</h1>
-          <p className="text-muted-foreground mt-1">Il gestionale per decoratori professionisti</p>
+          <p className="text-muted-foreground mt-1">Accesso riservato agli account autorizzati</p>
         </div>
 
         <Card className="p-6 shadow-elevated">
-          <div className="flex gap-2 mb-6 p-1 bg-muted rounded-xl">
-            <button
-              type="button"
-              onClick={() => setMode("signin")}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${mode === "signin" ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"}`}
-            >
-              Accedi
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("signup")}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${mode === "signup" ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"}`}
-            >
-              Registrati
-            </button>
-          </div>
-
           <form onSubmit={handleSubmit} className="space-y-4">
-            {mode === "signup" && (
-              <div className="space-y-1.5">
-                <Label htmlFor="displayName">Nome</Label>
-                <Input
-                  id="displayName"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Mario Rossi"
-                />
-              </div>
-            )}
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -145,7 +102,7 @@ export default function Auth() {
               disabled={submitting}
               className="w-full bg-accent hover:bg-accent/90 text-accent-foreground h-11 text-base font-semibold"
             >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "signin" ? "Accedi" : "Crea account"}
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Accedi"}
             </Button>
           </form>
 

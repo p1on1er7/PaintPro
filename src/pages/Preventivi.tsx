@@ -115,7 +115,7 @@ export default function Preventivi() {
       data_lavoro: head.data_lavoro || null,
       ora: head.ora || null,
       note: head.note || null,
-      voci: voci as any,
+      voci,
       totale,
     };
 

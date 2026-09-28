@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Loader2 } from "lucide-react";
 
 export default function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { user, loading, authIssue } = useAuth();
+  const { user, loading, authIssue, signOut } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -20,6 +20,9 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
         <div className="max-w-md rounded-2xl border border-border bg-card p-5 shadow-sm">
           <h1 className="text-lg font-semibold mb-2">Errore avvio autenticazione</h1>
           <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">{authIssue}</p>
+          <button type="button" onClick={() => void signOut()} className="mt-4 text-sm font-medium text-accent underline">
+            Esci e torna al login
+          </button>
         </div>
       </div>
     );

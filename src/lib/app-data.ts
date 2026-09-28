@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { appConfig, isLocalDataMode } from "@/lib/app-config";
 import { clearLocalTable, deleteLocalRow, ensureLocalUser, readLocalTable, saveLocalRow } from "@/lib/local-db";
+import type { Json } from "@/integrations/supabase/types";
 
 export type AuthUser = {
   id: string;
@@ -32,7 +33,7 @@ export type LogisticaItemRecord = {
   unit: string | null;
   price: number | null;
   notes: string | null;
-  metadata: Record<string, unknown>;
+  metadata: { brand?: string; code?: string; [key: string]: Json | undefined };
   created_at?: string;
   updated_at?: string;
 };
@@ -253,7 +254,21 @@ export async function listGeneratedImages() {
     .limit(12);
 
   if (error) throw error;
-  return (data ?? []) as GeneratedImageRecord[];
+  return Promise.all((data ?? []).map(async (record) => {
+    const resultUrl = record.result_url;
+    try {
+      const marker = "/storage/v1/object/public/paintpro/";
+      const pathname = new URL(resultUrl).pathname;
+      if (!pathname.includes(marker)) return record as GeneratedImageRecord;
+
+      const objectPath = decodeURIComponent(pathname.split(marker)[1]);
+      const { data: signed, error: signError } = await supabase.storage.from("paintpro").createSignedUrl(objectPath, 3600);
+      if (signError || !signed?.signedUrl) return record as GeneratedImageRecord;
+      return { ...record, result_url: signed.signedUrl } as GeneratedImageRecord;
+    } catch {
+      return record as GeneratedImageRecord;
+    }
+  }));
 }
 
 export async function saveGeneratedImage(payload: Omit<GeneratedImageRecord, "id" | "user_id" | "created_at" | "updated_at">) {

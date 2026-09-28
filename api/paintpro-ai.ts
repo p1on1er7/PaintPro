@@ -1,4 +1,36 @@
-function sendJson(res: any, body: unknown, status = 200) {
+import { createHash } from "node:crypto";
+
+const PRIVATE_ACCOUNT_HASHES = new Set([
+  "f042bbb7a5554b01850bad53abc5ca5fbb7184b4e2a784fa9f654a8c1b0aa99a",
+  "0ff1277dba4c40f61cf1497228f73266f5b959355683363be0df35185d33c819",
+]);
+
+type ApiResponse = {
+  setHeader: (name: string, value: string) => void;
+  status: (status: number) => ApiResponse;
+  json: (body: unknown) => unknown;
+  end: () => unknown;
+};
+
+type ApiRequest = {
+  method?: string;
+  headers?: Record<string, string | string[] | undefined>;
+  body?: unknown;
+};
+
+type OpenAiResponseData = {
+  output_text?: unknown;
+  output?: Array<{
+    text?: unknown;
+    output_text?: unknown;
+    content?: Array<{ text?: unknown; output_text?: unknown; content?: unknown; refusal?: unknown }>;
+  }>;
+  status?: string;
+  incomplete_details?: { reason?: string };
+  usage?: { output_tokens?: number; output_tokens_details?: { reasoning_tokens?: number } };
+};
+
+function sendJson(res: ApiResponse, body: unknown, status = 200) {
   res.setHeader("Content-Type", "application/json");
   res.setHeader("Cache-Control", "no-store");
   return res.status(status).json(body);
@@ -26,6 +58,46 @@ function getEnvBool(name: string, fallback = false) {
 function getEnvNumber(name: string, fallback: number) {
   const value = Number(getEnv(name));
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+async function authorizeRequest(req: { headers?: Record<string, string | string[] | undefined> }) {
+  const rawAuthorization = req.headers?.authorization;
+  const authorization = Array.isArray(rawAuthorization) ? rawAuthorization[0] : rawAuthorization;
+  const token = authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
+  if (!token) return { error: "Accedi a PaintPro per usare l'assistente AI.", status: 401 };
+
+  const supabaseUrl = getEnv("VITE_SUPABASE_URL").trim().replace(/\/+$/, "");
+  const publishableKey = getEnv("VITE_SUPABASE_PUBLISHABLE_KEY").trim();
+  if (!supabaseUrl || !publishableKey) {
+    return { error: "Supabase non configurato sul backend AI.", status: 503 };
+  }
+
+  try {
+    const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { apikey: publishableKey, Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return { error: "Sessione scaduta. Accedi di nuovo a PaintPro.", status: 401 };
+
+    const user = (await response.json()) as { id?: string; email?: string };
+    if (!user.id) return { error: "Sessione non valida.", status: 401 };
+
+    const allowedEmails = getEnv("PAINTPRO_ALLOWED_EMAILS")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean);
+    const email = user.email?.trim().toLowerCase() ?? "";
+    const authorized = allowedEmails.length
+      ? allowedEmails.includes(email)
+      : PRIVATE_ACCOUNT_HASHES.has(createHash("sha256").update(email).digest("hex"));
+    if (!authorized) {
+      return { error: "Questo account non e' autorizzato a usare PaintPro AI.", status: 403 };
+    }
+
+    return { userId: user.id };
+  } catch {
+    return { error: "Impossibile verificare la sessione. Riprova tra poco.", status: 503 };
+  }
 }
 
 function uniqueValues(values: string[]) {
@@ -70,7 +142,7 @@ function extractTextContent(input: unknown) {
   return "";
 }
 
-function extractResponseText(data: any) {
+function extractResponseText(data: OpenAiResponseData) {
   const directText = extractTextContent(data?.output_text);
   if (directText) return directText;
 
@@ -97,7 +169,7 @@ function isReasoningModel(model: string) {
   return /^(gpt-5|o\d|o\d-)/i.test(model);
 }
 
-function buildEmptyTextError(data: any) {
+function buildEmptyTextError(data: OpenAiResponseData) {
   const status = data?.status ? `status ${data.status}` : "risposta senza testo";
   const reason = data?.incomplete_details?.reason ? `, motivo ${data.incomplete_details.reason}` : "";
   const usage = data?.usage?.output_tokens
@@ -327,31 +399,32 @@ async function callOpenAiImage(prompt: string, sourceImage: string | null) {
   };
 }
 
-export default async function handler(req: any, res: any) {
+export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "GET" && req.method !== "POST") return sendJson(res, { error: "Method not allowed" }, 405);
+
+  const authorization = await authorizeRequest(req);
+  if ("error" in authorization) {
+    return sendJson(res, { error: authorization.error }, authorization.status);
+  }
+
   if (req.method === "GET") {
     return sendJson(res, {
       ok: true,
-      openaiKeyConfigured: Boolean(getEnv("OPENAI_API_KEY")),
-      textModel: getEnv("OPENAI_TEXT_MODEL", "gpt-5-mini"),
-      textMaxOutputTokens: getEnvNumber("OPENAI_TEXT_MAX_OUTPUT_TOKENS", 2200),
-      textReasoningEffort: getEnv("OPENAI_TEXT_REASONING_EFFORT", "minimal"),
-      imageModel: getEnv("OPENAI_IMAGE_MODEL", "gpt-image-1-mini"),
-      imageSize: getEnv("OPENAI_IMAGE_SIZE", "1024x1024"),
-      imageQuality: getEnv("OPENAI_IMAGE_QUALITY", "low"),
-      imageFormat: getEnv("OPENAI_IMAGE_FORMAT", "png"),
-      webSearchEnabled: getEnvBool("OPENAI_ENABLE_WEB_SEARCH", true),
-      runtime: "node",
+      userId: authorization.userId,
     });
   }
-  if (req.method !== "POST") return sendJson(res, { error: "Method not allowed" }, 405);
 
   if (!getEnv("OPENAI_API_KEY")) {
     return sendJson(res, { error: "OPENAI_API_KEY non configurata" }, 500);
   }
 
   try {
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body ?? {};
+    const body = (typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body ?? {}) as {
+      messages?: Array<{ role: string; content: string }>;
+      sourceImage?: string | null;
+      appContext?: string;
+    };
     const { messages = [], sourceImage = null, appContext = "" } = body;
     const safeMessages = Array.isArray(messages)
       ? messages

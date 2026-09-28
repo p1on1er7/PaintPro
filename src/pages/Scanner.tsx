@@ -211,9 +211,9 @@ export default function Scanner() {
       if (data.image) {
         await loadHistory();
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      toast.error(err?.message ?? "Errore di rete");
+      toast.error(err instanceof Error ? err.message : "Errore di rete");
     } finally {
       setChatLoading(false);
     }

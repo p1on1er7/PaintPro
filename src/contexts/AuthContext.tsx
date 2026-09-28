@@ -20,6 +20,17 @@ const AuthContext = createContext<AuthContextValue>({
   signOut: async () => {},
 });
 
+async function verifyPaintProAccess(token: string) {
+  const response = await fetch("/api/paintpro-ai", {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(12000),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || "Accesso a PaintPro non disponibile. Riprova tra poco.");
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -64,30 +75,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     let active = true;
+    let verification = 0;
     const loadingTimeout = window.setTimeout(() => {
       if (!active) return;
       setAuthIssue("Timeout inizializzazione autenticazione cloud.");
       setLoading(false);
-    }, 8000);
+    }, 15000);
+
+    const applySession = async (session: { access_token: string; user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } } | null) => {
+      const currentVerification = ++verification;
+      if (!session) {
+        if (!active) return;
+        setSessionToken(null);
+        setUser(null);
+        setAuthIssue(null);
+        setLoading(false);
+        window.clearTimeout(loadingTimeout);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        await verifyPaintProAccess(session.access_token);
+        if (!active || currentVerification !== verification) return;
+        setSessionToken(session.access_token);
+        setUser(mapCloudUser(session.user));
+        setAuthIssue(null);
+      } catch (error) {
+        if (!active || currentVerification !== verification) return;
+        setSessionToken(null);
+        setUser(null);
+        setAuthIssue(error instanceof Error ? error.message : "Accesso a PaintPro non disponibile.");
+      } finally {
+        if (active && currentVerification === verification) {
+          setLoading(false);
+          window.clearTimeout(loadingTimeout);
+        }
+      }
+    };
 
     try {
       const {
         data: { subscription },
       } = supabase.auth.onAuthStateChange((_event, s) => {
         if (!active) return;
-        setSessionToken(s?.access_token ?? null);
-        setUser(mapCloudUser(s?.user ?? null));
+        void applySession(s);
       });
 
       supabase.auth
         .getSession()
         .then(({ data: { session: s } }) => {
           if (!active) return;
-          setSessionToken(s?.access_token ?? null);
-          setUser(mapCloudUser(s?.user ?? null));
-          setAuthIssue(null);
-          setLoading(false);
-          window.clearTimeout(loadingTimeout);
+          void applySession(s);
         })
         .catch((error) => {
           if (!active) return;
@@ -116,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     if (isLocalDataMode) return;
     await supabase.auth.signOut();
+    setAuthIssue(null);
   };
 
   return (

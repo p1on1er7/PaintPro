@@ -2,6 +2,19 @@
 
 Gestionale per decoratori con approccio `local-first`.
 
+## Installazione privata per due persone
+
+La versione condivisa su telefono deve usare `VITE_APP_MODE=cloud`, Supabase per il login e i dati, e `/api/paintpro-ai` per l'AI. Il backend verifica la sessione Supabase e ammette solo i due account autorizzati; la pagina di registrazione non e' disponibile. Non usare `VITE_APP_MODE=local` sul deploy condiviso: salverebbe i dati separatamente su ogni dispositivo e salterebbe il login.
+
+Prima di considerare il deploy completamente privato:
+
+1. Su Vercel disattiva **Vercel Authentication** per il progetto. Il login PaintPro rimane attivo e cosi' anche il secondo telefono puo' aprire il sito.
+2. Su Supabase, in **Authentication > Providers > Email**, disattiva le nuove registrazioni e verifica che siano presenti soltanto i due account voluti.
+3. Applica nel **SQL Editor** la migrazione `supabase/migrations/20260928000000_private_paintpro_storage.sql`: il bucket delle foto diventa privato e le immagini gia' salvate vengono mostrate tramite URL firmati.
+4. Se le vecchie Edge Functions Lovable sono ancora distribuite, eliminale oppure ridistribuiscile con la nuova verifica dell'account. Il frontend attuale usa solo `/api/paintpro-ai`.
+
+Le impostazioni Vercel e Supabase non sono modificate automaticamente da un `git push`. Mantieni `OPENAI_API_KEY` soltanto nelle variabili server di Vercel; non aggiungerla alle variabili `VITE_` o al repository.
+
 ## Cosa e' cambiato
 
 - I dati di `Scanner`, `Logistica`, `Preventivi` e `Calendario` possono girare in locale senza Supabase.

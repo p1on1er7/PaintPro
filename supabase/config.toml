@@ -1,7 +1,7 @@
 project_id = "qnzznwhogreduxpczqiu"
 
 [functions.chat-decoratore]
-verify_jwt = false
+verify_jwt = true
 
 [functions.genera-immagine]
-verify_jwt = false
+verify_jwt = true

@@ -440,9 +440,17 @@ async function callLocalImageApi(prompt: string, photoDataUrl: string | null) {
 }
 
 async function callHostedAi(messages: AssistantMessage[], photoDataUrl: string | null, appContext: string) {
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !session?.access_token) {
+    throw new Error("Sessione scaduta. Esci e accedi di nuovo a PaintPro.");
+  }
+
   const response = await fetch(appConfig.aiBackendUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
     body: JSON.stringify({
       messages: messages.slice(-MAX_REMOTE_MESSAGES),
       sourceImage: photoDataUrl,
@@ -464,6 +472,7 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
   const wantsImage = isImageRequest(lastUserMessage);
   const cacheKey = buildCacheKey(messages, photoDataUrl);
   const cached = wantsAppData || wantsImage ? null : findCachedResponse(cacheKey);
+  let cloudError: string | null = null;
   if (cached) {
     return {
       content: cached.content,
@@ -499,6 +508,7 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
       };
       return response;
     } catch (error) {
+      cloudError = error instanceof Error ? error.message : "Errore AI cloud";
       const fallbackDataAnswer = await buildAppDataAnswer(lastUserMessage);
       if (fallbackDataAnswer) {
         return {
@@ -597,33 +607,9 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
         };
         saveCachedResponse(cacheKey, response);
         return response;
-      } catch {
-        // Fall through to Supabase or offline response.
+      } catch (error) {
+        cloudError = error instanceof Error ? error.message : "Errore AI cloud";
       }
-    }
-
-    try {
-      const { data, error } = await supabase.functions.invoke("chat-decoratore", {
-        body: {
-          messages: messages.slice(-MAX_REMOTE_MESSAGES),
-          hasPhoto: Boolean(photoDataUrl),
-          sourceImage: photoDataUrl,
-          storeResult: appConfig.persistRemoteGeneratedImages,
-        },
-      });
-
-      if (!error && !data?.error) {
-        const response: AssistantResponse = {
-          content: data.content || "Non ho ricevuto una risposta valida.",
-          image: data.image ?? null,
-          savedToHistory: Boolean(data.savedToHistory),
-          source: "cloud-supabase",
-        };
-        saveCachedResponse(cacheKey, response);
-        return response;
-      }
-    } catch {
-      // Fall through to offline response.
     }
   }
 
@@ -635,7 +621,7 @@ export async function sendPaintProChat(messages: AssistantMessage[], photoDataUr
           `Modalita AI letta dall'app: ${appConfig.aiMode}.`,
           "Su Vercel controlla `VITE_AI_BACKEND_URL=/api/paintpro-ai` e poi fai redeploy.",
         ].join("\n")
-      : localRule ??
+      : cloudError ?? localRule ??
         [
           "Non riesco a usare il backend AI in questo deploy.",
           `Backend letto dall'app: ${hasAiBackend ? appConfig.aiBackendUrl : "mancante"}.`,
