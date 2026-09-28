@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { PAINTPRO_SUPABASE_ANON_KEY, PAINTPRO_SUPABASE_URL } from "../src/lib/supabase-public-config";
+
+// Keep these public anon credentials local to this function: Vercel packages api/ separately.
+const PAINTPRO_SUPABASE_URL = "https://qnzznwhogreduxpczqiu.supabase.co";
+const PAINTPRO_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFuenpud2hvZ3JlZHV4cGN6cWl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3NzY0NzAsImV4cCI6MjA5MjM1MjQ3MH0.Dp8KaJPtchhJEaBxIWSYjmG8FbG71bUhjig5IyoyqBc";
 
 const PRIVATE_ACCOUNT_HASHES = new Set([
   "f042bbb7a5554b01850bad53abc5ca5fbb7184b4e2a784fa9f654a8c1b0aa99a",
