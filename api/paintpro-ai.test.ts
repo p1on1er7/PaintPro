@@ -40,8 +40,8 @@ describe("PaintPro AI access", () => {
   });
 
   it("admits only an email on the server allowlist", async () => {
-    vi.stubEnv("VITE_SUPABASE_URL", "https://example.supabase.co");
-    vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "public-key");
+    vi.stubEnv("VITE_SUPABASE_URL", "https://old-project.supabase.co");
+    vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "old-key");
     vi.stubEnv("PAINTPRO_ALLOWED_EMAILS", "owner@example.com,worker@example.com");
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "user-1", email: "owner@example.com" }) });
     vi.stubGlobal("fetch", fetchMock);
@@ -50,14 +50,12 @@ describe("PaintPro AI access", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body?.ok).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith("https://example.supabase.co/auth/v1/user", expect.objectContaining({
-      headers: { apikey: "public-key", Authorization: "Bearer valid-session" },
+    expect(fetchMock).toHaveBeenCalledWith("https://qnzznwhogreduxpczqiu.supabase.co/auth/v1/user", expect.objectContaining({
+      headers: { apikey: expect.any(String), Authorization: "Bearer valid-session" },
     }));
   });
 
   it("rejects a valid Supabase account outside the two allowed emails", async () => {
-    vi.stubEnv("VITE_SUPABASE_URL", "https://example.supabase.co");
-    vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "public-key");
     vi.stubEnv("PAINTPRO_ALLOWED_EMAILS", "owner@example.com,worker@example.com");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "user-2", email: "other@example.com" }) }));
 

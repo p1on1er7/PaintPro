@@ -6,6 +6,8 @@ Gestionale per decoratori con approccio `local-first`.
 
 La versione condivisa su telefono deve usare `VITE_APP_MODE=cloud`, Supabase per il login e i dati, e `/api/paintpro-ai` per l'AI. Il backend verifica la sessione Supabase e ammette solo i due account autorizzati; la pagina di registrazione non e' disponibile. Non usare `VITE_APP_MODE=local` sul deploy condiviso: salverebbe i dati separatamente su ogni dispositivo e salterebbe il login.
 
+L'URL e la chiave **anon pubblica** del progetto Supabase attivo sono fissati in `src/lib/supabase-public-config.ts`, usato anche dal backend. Le vecchie variabili `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` presenti su Vercel non vengono piu' lette: un valore obsoleto aveva bloccato il login sui telefoni. La chiave `service_role` non deve mai essere aggiunta al repository.
+
 Prima di considerare il deploy completamente privato:
 
 1. Su Vercel disattiva **Vercel Authentication** per il progetto. Il login PaintPro rimane attivo e cosi' anche il secondo telefono puo' aprire il sito.

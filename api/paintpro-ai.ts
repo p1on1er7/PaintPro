@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { PAINTPRO_SUPABASE_ANON_KEY, PAINTPRO_SUPABASE_URL } from "../src/lib/supabase-public-config";
 
 const PRIVATE_ACCOUNT_HASHES = new Set([
   "f042bbb7a5554b01850bad53abc5ca5fbb7184b4e2a784fa9f654a8c1b0aa99a",
@@ -66,15 +67,9 @@ async function authorizeRequest(req: { headers?: Record<string, string | string[
   const token = authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
   if (!token) return { error: "Accedi a PaintPro per usare l'assistente AI.", status: 401 };
 
-  const supabaseUrl = getEnv("VITE_SUPABASE_URL").trim().replace(/\/+$/, "");
-  const publishableKey = getEnv("VITE_SUPABASE_PUBLISHABLE_KEY").trim();
-  if (!supabaseUrl || !publishableKey) {
-    return { error: "Supabase non configurato sul backend AI.", status: 503 };
-  }
-
   try {
-    const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: { apikey: publishableKey, Authorization: `Bearer ${token}` },
+    const response = await fetch(`${PAINTPRO_SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: PAINTPRO_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) return { error: "Sessione scaduta. Accedi di nuovo a PaintPro.", status: 401 };
