@@ -1,12 +1,12 @@
+import { PAINTPRO_SUPABASE_ANON_KEY, PAINTPRO_SUPABASE_URL } from "@/lib/supabase-public-config";
+
 const normalize = (value?: string) => value?.trim().toLowerCase() ?? "";
 
 const appMode = normalize(import.meta.env.VITE_APP_MODE);
 const aiMode = normalize(import.meta.env.VITE_AI_MODE);
 const configuredAiBackendUrl = import.meta.env.VITE_AI_BACKEND_URL?.trim() || "";
 
-export const supabaseConfigured = Boolean(
-  import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-);
+export const supabaseConfigured = Boolean(PAINTPRO_SUPABASE_URL && PAINTPRO_SUPABASE_ANON_KEY);
 
 export const isLocalDataMode = appMode !== "cloud" || !supabaseConfigured;
 export const aiBackendUrl = configuredAiBackendUrl || (import.meta.env.PROD ? "/api/paintpro-ai" : "");

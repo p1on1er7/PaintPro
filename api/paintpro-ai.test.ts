@@ -50,7 +50,7 @@ describe("PaintPro AI access", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body?.ok).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith("https://qnzznwhogreduxpczqiu.supabase.co/auth/v1/user", expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith("https://gnmomhozgwbdchlxiath.supabase.co/auth/v1/user", expect.objectContaining({
       headers: { apikey: expect.any(String), Authorization: "Bearer valid-session" },
     }));
   });

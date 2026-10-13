@@ -6,7 +6,7 @@ Gestionale per decoratori con approccio `local-first`.
 
 La versione condivisa su telefono deve usare `VITE_APP_MODE=cloud`, Supabase per il login e i dati, e `/api/paintpro-ai` per l'AI. Il backend verifica la sessione Supabase e ammette solo i due account autorizzati; la pagina di registrazione non e' disponibile. Non usare `VITE_APP_MODE=local` sul deploy condiviso: salverebbe i dati separatamente su ogni dispositivo e salterebbe il login.
 
-L'URL e la chiave **anon pubblica** del progetto Supabase attivo sono fissati in `src/lib/supabase-public-config.ts` e ripetuti in `api/paintpro-ai.ts`, poiche' Vercel distribuisce la funzione separatamente. Le vecchie variabili `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` presenti su Vercel non vengono piu' lette: un valore obsoleto aveva bloccato il login sui telefoni. La chiave `service_role` non deve mai essere aggiunta al repository.
+L'URL e la chiave **anon pubblica** del progetto Supabase PaintPro sono fissati in `src/lib/supabase-public-config.ts` e ripetuti in `api/paintpro-ai.ts`, poiche' Vercel distribuisce la funzione separatamente. Il progetto e' `gnmomhozgwbdchlxiath`, quello in cui risultano gli account PaintPro. Le vecchie variabili `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` presenti su Vercel non vengono piu' lette. La chiave `service_role` non deve mai essere aggiunta al repository.
 
 Prima di considerare il deploy completamente privato:
 
@@ -44,7 +44,7 @@ Note:
 - `VITE_AI_MODE=local` usa prima provider locali.
 - `VITE_AI_MODE=hybrid` usa locale e poi cloud solo se serve.
 - `VITE_LOCAL_IMAGE_API_URL` e' opzionale: deve accettare `POST` JSON con `prompt` e `sourceImage`, e restituire `url`, `image_url`, `image` oppure `dataUrl`.
-- Se vuoi ancora il cloud, imposta anche `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY`.
+- La versione cloud usa il progetto Supabase definito in `src/lib/supabase-public-config.ts`; le vecchie variabili `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` non sono necessarie.
 
 ## Versione telefono consigliata
 
