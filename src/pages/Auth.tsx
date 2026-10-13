@@ -17,6 +17,7 @@ export default function Auth() {
   const [submitting, setSubmitting] = useState(false);
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const [checkingSupabase, setCheckingSupabase] = useState(false);
+  const [sendingReset, setSendingReset] = useState(false);
 
   if (loading) {
     return (
@@ -59,6 +60,23 @@ export default function Auth() {
     } finally {
       setCheckingSupabase(false);
     }
+  };
+
+  const sendReset = async () => {
+    if (!email.trim()) {
+      setDiagnostic("Inserisci prima l'email del tuo account.");
+      return;
+    }
+    setSendingReset(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/?reset=1`,
+    });
+    setSendingReset(false);
+    if (error) {
+      setDiagnostic(error.message);
+      return;
+    }
+    setDiagnostic("Se l'account esiste, riceverai un'email con il link per scegliere una nuova password.");
   };
 
   return (
@@ -105,6 +123,10 @@ export default function Auth() {
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Accedi"}
             </Button>
           </form>
+
+          <Button type="button" variant="link" onClick={sendReset} disabled={sendingReset} className="mt-2 px-0">
+            {sendingReset ? "Invio in corso..." : "Password dimenticata?"}
+          </Button>
 
           {diagnostic && (
             <div className="mt-4 rounded-lg border border-border bg-muted p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">

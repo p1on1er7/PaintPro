@@ -11,6 +11,7 @@ import Logistica from "./pages/Logistica";
 import Preventivi from "./pages/Preventivi";
 import Calendario from "./pages/Calendario";
 import NotFound from "./pages/NotFound.tsx";
+import ResetPassword from "./pages/ResetPassword";
 
 const queryClient = new QueryClient();
 
@@ -19,7 +20,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner position="top-center" />
-      <HashRouter>
+      {new URLSearchParams(window.location.search).has("reset") ? <ResetPassword /> : <HashRouter>
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<Auth />} />
@@ -30,7 +31,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
-      </HashRouter>
+      </HashRouter>}
     </TooltipProvider>
   </QueryClientProvider>
 );
