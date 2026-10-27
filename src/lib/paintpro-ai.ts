@@ -372,27 +372,60 @@ async function fileToDataUrl(file: Blob) {
 }
 
 export async function compressImageForAi(file: File, maxSide = 1152, quality = 0.76) {
-  const bitmap = await createImageBitmap(file);
-  const ratio = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * ratio));
-  const height = Math.max(1, Math.round(bitmap.height * ratio));
+  let source: ImageBitmap | HTMLImageElement;
+  let sourceWidth: number;
+  let sourceHeight: number;
+  let release = () => {};
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    source = bitmap;
+    sourceWidth = bitmap.width;
+    sourceHeight = bitmap.height;
+    release = () => bitmap.close();
+  } catch {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("Formato foto non supportato"));
+        image.src = objectUrl;
+      });
+      source = image;
+      sourceWidth = image.naturalWidth;
+      sourceHeight = image.naturalHeight;
+      release = () => URL.revokeObjectURL(objectUrl);
+    } catch {
+      URL.revokeObjectURL(objectUrl);
+      throw new Error("Il telefono non riesce a leggere questa foto. Prova con una foto JPEG o PNG.");
+    }
+  }
+
+  const ratio = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * ratio));
+  const height = Math.max(1, Math.round(sourceHeight * ratio));
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
 
-  const context = canvas.getContext("2d");
-  if (!context) {
-    bitmap.close();
-    return fileToDataUrl(file);
+  try {
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Impossibile preparare la foto sul telefono.");
+    context.drawImage(source, 0, 0, width, height);
+  } finally {
+    release();
   }
 
-  context.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
-
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-  if (!blob) return fileToDataUrl(file);
-  return fileToDataUrl(blob);
+  if (blob?.type === "image/jpeg" && blob.size > 0) return fileToDataUrl(blob);
+
+  const dataUrl = canvas.toDataURL("image/jpeg", quality);
+  if (!dataUrl.startsWith("data:image/jpeg,")) {
+    throw new Error("Il telefono non riesce a convertire la foto in JPEG.");
+  }
+  return dataUrl;
 }
 
 async function callOllama(messages: AssistantMessage[]) {

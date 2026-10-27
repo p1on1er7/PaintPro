@@ -155,13 +155,20 @@ export default function Scanner() {
     setUploading(true);
     try {
       const compressed = await compressImageForAi(file);
+      await new Promise<void>((resolve, reject) => {
+        const preview = new Image();
+        preview.onload = () => resolve();
+        preview.onerror = () => reject(new Error("La foto e' stata convertita ma non si apre sul telefono. Prova un'altra foto."));
+        preview.src = compressed;
+      });
       setPhotoUrl(compressed);
       setPhotoName(file.name);
       toast.success("Foto ottimizzata e pronta");
-    } catch {
-      toast.error("Errore preparazione foto");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Errore preparazione foto");
     } finally {
       setUploading(false);
+      e.target.value = "";
     }
   }
 
@@ -253,7 +260,16 @@ export default function Scanner() {
         >
           {photoUrl ? (
             <>
-              <img src={photoUrl} alt="Foto" className="w-full max-h-[320px] object-contain" />
+              <img
+                src={photoUrl}
+                alt="Foto"
+                className="w-full max-h-[320px] object-contain"
+                onError={() => {
+                  setPhotoUrl(null);
+                  setPhotoName(null);
+                  toast.error("Anteprima non disponibile. Ricarica la foto in formato JPEG o PNG.");
+                }}
+              />
               {uploading && (
                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                   <Loader2 className="h-6 w-6 animate-spin text-white" />
